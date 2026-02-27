@@ -175,13 +175,7 @@ export async function uploadAvatar(file: File): Promise<string> {
 
     if (uploadError) {
         console.error('Error uploading avatar:', uploadError)
-        // 回退到 Base64
-        return new Promise((resolve, reject) => {
-            const reader = new FileReader()
-            reader.onloadend = () => resolve(reader.result as string)
-            reader.onerror = reject
-            reader.readAsDataURL(file)
-        })
+        throw new Error(`头像上传失败: ${uploadError.message}`)
     }
 
     const { data } = supabase.storage

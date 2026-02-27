@@ -220,10 +220,18 @@ export default function App() {
           />
         );
       case 'about':
-        return <AboutView avatar={userInfo.avatar} userInfo={userInfo} onAvatarUpload={(f) => {
-          const reader = new FileReader();
-          reader.onloadend = () => setUserInfo(prev => ({ ...prev, avatar: reader.result as string }));
-          reader.readAsDataURL(f);
+        return <AboutView avatar={userInfo.avatar} userInfo={userInfo} onAvatarUpload={async (f) => {
+          try {
+            const avatarUrl = await authService.uploadAvatar(f);
+            // 更新 state → 触发 useEffect 自动保存到 localStorage → 刷新后保留
+            setUserInfo(prev => ({ ...prev, avatar: avatarUrl }));
+            // 同步更新 Supabase 用户记录
+            if (userInfo.codename) {
+              await authService.updateAvatar(userInfo.codename, avatarUrl);
+            }
+          } catch (err) {
+            console.error('头像上传失败:', err);
+          }
         }} theme={theme} />;
       case 'login':
         return <LoginView onLogin={handleLogin} onGuest={() => setCurrentView('home')} theme={theme} />;

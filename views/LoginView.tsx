@@ -4,6 +4,7 @@ import { motion, AnimatePresence } from 'framer-motion';
 import { Camera, User, Lock, ShieldCheck, Zap, AlertCircle } from 'lucide-react';
 import { ThemeType } from '../types';
 import { DEFAULT_AVATAR_URL } from '../constants';
+import * as authService from '../services/authService';
 
 // 管理员密码 (生产环境应使用环境变量)
 const ADMIN_PASSWORD = 'guaiyubawan';
@@ -24,15 +25,19 @@ const LoginView: React.FC<LoginViewProps> = ({ onLogin, onGuest, theme }) => {
   const fileInputRef = useRef<HTMLInputElement>(null);
   const isDark = theme === 'dark';
 
-  const handleFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+  const handleFileChange = async (e: React.ChangeEvent<HTMLInputElement>) => {
     if (e.target.files && e.target.files[0]) {
       setIsScanning(true);
-      const reader = new FileReader();
-      reader.onloadend = () => {
-        setAvatar(reader.result as string);
+      try {
+        const avatarUrl = await authService.uploadAvatar(e.target.files[0]);
+        setAvatar(avatarUrl);
+      } catch (err) {
+        console.error('头像上传失败:', err);
+        // 上传失败时用本地预览作为临时头像
+        setAvatar(URL.createObjectURL(e.target.files[0]));
+      } finally {
         setTimeout(() => setIsScanning(false), 1500);
-      };
-      reader.readAsDataURL(e.target.files[0]);
+      }
     }
   };
 
