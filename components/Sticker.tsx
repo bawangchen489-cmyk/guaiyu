@@ -14,8 +14,7 @@ interface StickerProps {
 
 const Sticker: React.FC<StickerProps> = ({ children, x, y, rotate, delay, color, shape }) => {
   const { scrollY } = useScroll();
-  
-  // 核心优化：使用 useMemo 锁定随机值，防止父组件重绘（如鼠标移动）导致随机值重新生成
+
   const { targetFallY, driftX, rotationIntensity } = useMemo(() => ({
     targetFallY: 75 + (Math.random() * 13),
     driftX: (Math.random() - 0.5) * 60,
@@ -25,39 +24,33 @@ const Sticker: React.FC<StickerProps> = ({ children, x, y, rotate, delay, color,
   const startYPercent = useMemo(() => parseFloat(y) || 0, [y]);
   const distanceToFall = useMemo(() => Math.max(0, targetFallY - startYPercent), [targetFallY, startYPercent]);
 
-  // 使用更平滑且消耗更低的弹簧配置
-  const springConfig = { stiffness: 40, damping: 15, mass: 0.8 };
+  // 更轻的弹簧配置，减少抖动
+  const springConfig = { stiffness: 30, damping: 20, mass: 1 };
 
-  // 映射滚动位移
   const yFall = useTransform(scrollY, [0, 500], ["0vh", `${distanceToFall}vh`]);
   const springY = useSpring(yFall, springConfig);
-  
+
   const xDrift = useTransform(scrollY, [0, 500], [0, driftX]);
   const springX = useSpring(xDrift, springConfig);
 
-  // 动态旋转
   const dynamicRotate = useTransform(scrollY, v => rotate + v * rotationIntensity);
 
   return (
     <motion.div
       initial={{ scale: 0, opacity: 0, rotate: rotate + 45 }}
       animate={{ scale: 1, opacity: 1, rotate: rotate }}
-      style={{ 
-        left: x, 
-        top: y, 
-        y: springY, 
+      style={{
+        left: x,
+        top: y,
+        y: springY,
         x: springX,
         rotate: dynamicRotate,
-        // 强制开启 GPU 加速
-        transformZ: 0,
-        backfaceVisibility: "hidden",
-        willChange: "transform, opacity",
       }}
-      transition={{ 
-        delay: delay, 
-        type: "spring", 
-        stiffness: 120, 
-        damping: 12 
+      transition={{
+        delay: delay,
+        type: "spring",
+        stiffness: 120,
+        damping: 12
       }}
       className={`absolute z-10 flex items-center justify-center font-black text-lg md:text-2xl uppercase tracking-wider shadow-[8px_8px_0px_rgba(0,0,0,0.3)] border-4 border-black cursor-pointer hover:scale-110 hover:z-50 transition-transform ${color} ${shape} whitespace-nowrap px-8 py-4`}
     >

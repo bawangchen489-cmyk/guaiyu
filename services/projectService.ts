@@ -284,36 +284,43 @@ export async function incrementViews(id: number | string): Promise<void> {
 }
 
 /**
- * 上传图片到 Supabase Storage
+ * 上传图片到 Supabase Storage（前端直传，绕过 Vercel Serverless 限制）
  */
 export async function uploadImage(file: File, folder: string = 'projects'): Promise<string> {
     if (!isSupabaseConfigured) {
-        // 本地模式：使用 Base64
-        return new Promise((resolve, reject) => {
-            const reader = new FileReader()
-            reader.onloadend = () => resolve(reader.result as string)
-            reader.onerror = reject
-            reader.readAsDataURL(file)
-        })
+        throw new Error('Supabase 未配置，无法上传文件。请在 .env.local 中设置 VITE_SUPABASE_URL 和 VITE_SUPABASE_ANON_KEY。')
     }
 
     const fileExt = file.name.split('.').pop()
     const fileName = `${Date.now()}-${Math.random().toString(36).substring(7)}.${fileExt}`
     const filePath = `${folder}/${fileName}`
 
-    const { error: uploadError } = await supabase.storage
-        .from('images')
-        .upload(filePath, file)
+    try {
+        const { error: uploadError } = await supabase.storage
+            .from('images')
+            .upload(filePath, file, {
+                cacheControl: '3600',
+                contentType: file.type,
+                upsert: false
+            })
 
-    if (uploadError) {
-        console.error('Error uploading image:', uploadError)
-        // 回退到 Base64
-        return new Promise((resolve, reject) => {
-            const reader = new FileReader()
-            reader.onloadend = () => resolve(reader.result as string)
-            reader.onerror = reject
-            reader.readAsDataURL(file)
-        })
+        if (uploadError) {
+            console.error('Supabase upload error:', uploadError)
+            throw new Error(`文件上传失败: ${uploadError.message}`)
+        }
+    } catch (err: unknown) {
+        // 如果是我们自己抛出的错误，直接向上传递
+        if (err instanceof Error && err.message.startsWith('文件上传失败')) {
+            throw err
+        }
+        // 网络级别错误（Failed to fetch / CORS）
+        console.error('Network error during upload:', err)
+        throw new Error(
+            '文件上传网络错误。请检查：\n' +
+            '1. Supabase Storage 中是否已创建名为 "images" 的存储桶\n' +
+            '2. 存储桶是否设置为 Public（公开）\n' +
+            '3. 存储桶的 RLS 策略是否允许上传（INSERT）'
+        )
     }
 
     const { data } = supabase.storage
@@ -322,3 +329,4 @@ export async function uploadImage(file: File, folder: string = 'projects'): Prom
 
     return data.publicUrl
 }
+

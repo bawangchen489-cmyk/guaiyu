@@ -32,18 +32,8 @@ export default function App() {
   // 数据加载状态
   const [dataLoading, setDataLoading] = useState(true);
 
-  // 项目列表 - 优先从 Supabase 加载，回退到 localStorage
-  const [projects, setProjects] = useState<Project[]>(() => {
-    const saved = localStorage.getItem('guaiyu_projects_list');
-    if (saved) {
-      try {
-        return JSON.parse(saved);
-      } catch (e) {
-        return INITIAL_PROJECTS;
-      }
-    }
-    return INITIAL_PROJECTS;
-  });
+  // 项目列表 - 从 Supabase 加载，不再使用 INITIAL_PROJECTS 作为默认值
+  const [projects, setProjects] = useState<Project[]>([]);
 
   // 用户信息
   const [userInfo, setUserInfo] = useState<UserInfo>(() => {
@@ -52,7 +42,7 @@ export default function App() {
 
   const isAdmin = userInfo.status === 'authenticated';
 
-  // 点赞列表
+  // 点赞列表 (这个数据很小，存本地没问题)
   const [likedProjectIds, setLikedProjectIds] = useState<number[]>(() => {
     const saved = localStorage.getItem('guaiyu_liked_projects');
     return saved ? JSON.parse(saved) : [];
@@ -62,12 +52,15 @@ export default function App() {
   useEffect(() => {
     async function loadProjects() {
       try {
+        localStorage.removeItem('guaiyu_projects_list');
+
         const supabaseProjects = await projectService.getProjects();
-        if (supabaseProjects.length > 0) {
-          setProjects(supabaseProjects);
-        }
+        // 始终使用 Supabase 返回的数据（包括空数组，表示所有项目已被删除）
+        setProjects(supabaseProjects);
       } catch (error) {
-        console.warn('Failed to load from Supabase, using local data:', error);
+        console.warn('Supabase 加载失败，使用默认数据:', error);
+        // 仅在加载失败时才使用默认数据
+        setProjects(INITIAL_PROJECTS);
       } finally {
         setDataLoading(false);
       }
@@ -75,10 +68,8 @@ export default function App() {
     loadProjects();
   }, []);
 
-  // 同步项目到 localStorage（作为备份）
-  useEffect(() => {
-    localStorage.setItem('guaiyu_projects_list', JSON.stringify(projects));
-  }, [projects]);
+  // ✅ 修改点3：删除了那个把 projects 存入 localStorage 的 useEffect
+  // 原来的代码在这里会导致 quota exceeded 错误，现在直接依靠 Supabase 数据库即可
 
   // 保存用户信息
   useEffect(() => {
