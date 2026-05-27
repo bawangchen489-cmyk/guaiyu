@@ -56,21 +56,42 @@ function projectToRow(project: Partial<Project>): Partial<ProjectRow> {
     }
 }
 
+// localStorage key 只存用户上传的作品，不存 INITIAL_PROJECTS（防止超出 5MB 限制）
+const LOCAL_USER_PROJECTS_KEY = 'guaiyu_user_projects'
+
+/** 从 localStorage 读取用户自己创建的作品 */
+function getLocalUserProjects(): Project[] {
+    try {
+        const raw = localStorage.getItem(LOCAL_USER_PROJECTS_KEY)
+        if (!raw) return []
+        return JSON.parse(raw) as Project[]
+    } catch {
+        return []
+    }
+}
+
+/** 保存用户自己创建的作品列表到 localStorage */
+function saveLocalUserProjects(projects: Project[]): void {
+    try {
+        localStorage.setItem(LOCAL_USER_PROJECTS_KEY, JSON.stringify(projects))
+    } catch (e) {
+        console.error('⚠️ localStorage 写入失败，可能存储已满：', e)
+    }
+}
+
 /**
  * 获取所有项目
+ * - 如果 Supabase 已配置：从数据库读取，并合并本地用户作品
+ * - 如果未配置：返回 INITIAL_PROJECTS + 本地用户作品
  */
 export async function getProjects(): Promise<Project[]> {
+    const localUserProjects = getLocalUserProjects()
+
     if (!isSupabaseConfigured) {
-        // 未配置 Supabase 时，优先读本地存储，否则返回初始数据
-        const saved = localStorage.getItem('guaiyu_projects_list')
-        if (saved) {
-            try {
-                return JSON.parse(saved)
-            } catch {
-                return INITIAL_PROJECTS
-            }
-        }
-        return INITIAL_PROJECTS
+        // 未配置 Supabase：用本地用户作品 + 初始作品
+        const initialIds = new Set(INITIAL_PROJECTS.map(p => String(p.id)))
+        const userOnly = localUserProjects.filter(p => !initialIds.has(String(p.id)))
+        return [...userOnly, ...INITIAL_PROJECTS]
     }
 
     const { data, error } = await supabase
@@ -80,17 +101,20 @@ export async function getProjects(): Promise<Project[]> {
 
     if (error) {
         console.error('Error fetching projects:', error)
-        // 优先回退到本地缓存，其次才是初始数据
-        const saved = localStorage.getItem('guaiyu_projects_list')
-        if (saved) {
-            try {
-                return JSON.parse(saved)
-            } catch {}
-        }
-        return INITIAL_PROJECTS
+        // Supabase 失败：返回本地用户作品 + 初始作品
+        const initialIds = new Set(INITIAL_PROJECTS.map(p => String(p.id)))
+        const userOnly = localUserProjects.filter(p => !initialIds.has(String(p.id)))
+        return [...userOnly, ...INITIAL_PROJECTS]
     }
 
-    return (data || []).map(rowToProject)
+    const supabaseProjects = (data || []).map(rowToProject)
+    // 将本地用户作品合并进去（避免重复）
+    if (localUserProjects.length > 0) {
+        const supabaseIds = new Set(supabaseProjects.map(p => String(p.id)))
+        const localOnly = localUserProjects.filter(p => !supabaseIds.has(String(p.id)))
+        return [...localOnly, ...supabaseProjects]
+    }
+    return supabaseProjects
 }
 
 /**
@@ -122,14 +146,12 @@ export async function getProject(id: number | string): Promise<Project | null> {
  */
 export async function createProject(project: Omit<Project, 'id'>): Promise<Project> {
     const newProject = { ...project, id: Date.now() } as Project
+
     if (!isSupabaseConfigured) {
-        try {
-            const projects = await getProjects()
-            projects.unshift(newProject)
-            localStorage.setItem('guaiyu_projects_list', JSON.stringify(projects))
-        } catch (e) {
-            console.error('Failed to save project to localStorage:', e)
-        }
+        // 未配置 Supabase：只存用户作品到 guaiyu_user_projects
+        const userProjects = getLocalUserProjects()
+        userProjects.unshift(newProject)
+        saveLocalUserProjects(userProjects)
         return newProject
     }
 
@@ -143,14 +165,10 @@ export async function createProject(project: Omit<Project, 'id'>): Promise<Proje
 
     if (error) {
         console.error('Error creating project:', error)
-        // 回退：本地模式存储
-        try {
-            const projects = await getProjects()
-            projects.unshift(newProject)
-            localStorage.setItem('guaiyu_projects_list', JSON.stringify(projects))
-        } catch (e) {
-            console.error('Failed to save fallback project to localStorage:', e)
-        }
+        // 回退：存入本地用户作品（下次加载时会自动合并）
+        const userProjects = getLocalUserProjects()
+        userProjects.unshift(newProject)
+        saveLocalUserProjects(userProjects)
         return newProject
     }
 
@@ -201,20 +219,14 @@ export async function updateProject(id: number | string, updates: Partial<Projec
  * 删除项目
  */
 export async function deleteProject(id: number | string): Promise<void> {
-    const deleteLocal = async () => {
-        try {
-            const projects = await getProjects()
-            const filtered = projects.filter(p => String(p.id) !== String(id))
-            localStorage.setItem('guaiyu_projects_list', JSON.stringify(filtered))
-        } catch (e) {
-            console.error('Failed to delete project from localStorage:', e)
-        }
+    // 总是先删本地用户作品列表中对应的条目
+    const userProjects = getLocalUserProjects()
+    const filtered = userProjects.filter(p => String(p.id) !== String(id))
+    if (filtered.length !== userProjects.length) {
+        saveLocalUserProjects(filtered)
     }
 
-    if (!isSupabaseConfigured) {
-        await deleteLocal()
-        return
-    }
+    if (!isSupabaseConfigured) return
 
     const { error } = await supabase
         .from('projects')
@@ -223,10 +235,10 @@ export async function deleteProject(id: number | string): Promise<void> {
 
     if (error) {
         console.error('Error deleting project:', error)
-        // 尝试本地删除回退
-        await deleteLocal()
     }
 }
+
+
 
 /**
  * 增加项目点赞数

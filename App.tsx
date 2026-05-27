@@ -95,31 +95,38 @@ export default function App() {
     return saved ? JSON.parse(saved) : [];
   });
 
-  // 从 Supabase 加载项目数据（如未连接则使用 localStorage 本地缓存）
+  // 从 Supabase / localStorage 加载项目数据
   useEffect(() => {
     async function loadProjects() {
+      // 迁移旧的 guaiyu_projects_list 数据到新的 guaiyu_user_projects key
       try {
-        const supabaseProjects = await projectService.getProjects();
-        setProjects(supabaseProjects);
-      } catch (error) {
-        console.warn('Supabase 加载失败，尝试 localStorage 本地缓存:', error);
-        // 优先读本地缓存，实在没有再用初始数据
-        const saved = localStorage.getItem('guaiyu_projects_list');
-        if (saved) {
-          try {
-            setProjects(JSON.parse(saved));
-          } catch {
-            setProjects(INITIAL_PROJECTS);
+        const oldData = localStorage.getItem('guaiyu_projects_list');
+        const newData = localStorage.getItem('guaiyu_user_projects');
+        if (oldData && !newData) {
+          // 只迁移用户自己上传的作品（id 不在 INITIAL_PROJECTS 里的）
+          const initialIds = new Set(INITIAL_PROJECTS.map(p => String(p.id)));
+          const parsed: Project[] = JSON.parse(oldData);
+          const userOnly = parsed.filter(p => !initialIds.has(String(p.id)));
+          if (userOnly.length > 0) {
+            localStorage.setItem('guaiyu_user_projects', JSON.stringify(userOnly));
           }
-        } else {
-          setProjects(INITIAL_PROJECTS);
+          localStorage.removeItem('guaiyu_projects_list');
         }
+      } catch {}
+
+      try {
+        const allProjects = await projectService.getProjects();
+        setProjects(allProjects);
+      } catch (error) {
+        console.warn('项目加载失败，使用初始数据:', error);
+        setProjects(INITIAL_PROJECTS);
       } finally {
         setDataLoading(false);
       }
     }
     loadProjects();
   }, []);
+
 
   // 加载评论数
   useEffect(() => {
