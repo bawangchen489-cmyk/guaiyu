@@ -61,7 +61,7 @@ function projectToRow(project: Partial<Project>): Partial<ProjectRow> {
  */
 export async function getProjects(): Promise<Project[]> {
     if (!isSupabaseConfigured) {
-        // 未配置 Supabase 时，返回本地存储或初始数据
+        // 未配置 Supabase 时，优先读本地存储，否则返回初始数据
         const saved = localStorage.getItem('guaiyu_projects_list')
         if (saved) {
             try {
@@ -80,7 +80,13 @@ export async function getProjects(): Promise<Project[]> {
 
     if (error) {
         console.error('Error fetching projects:', error)
-        // 回退到本地数据
+        // 优先回退到本地缓存，其次才是初始数据
+        const saved = localStorage.getItem('guaiyu_projects_list')
+        if (saved) {
+            try {
+                return JSON.parse(saved)
+            } catch {}
+        }
         return INITIAL_PROJECTS
     }
 

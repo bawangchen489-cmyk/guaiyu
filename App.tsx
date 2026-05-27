@@ -62,19 +62,25 @@ export default function App() {
     return saved ? JSON.parse(saved) : [];
   });
 
-  // 从 Supabase 加载项目数据
+  // 从 Supabase 加载项目数据（如未连接则使用 localStorage 本地缓存）
   useEffect(() => {
     async function loadProjects() {
       try {
-        localStorage.removeItem('guaiyu_projects_list');
-
         const supabaseProjects = await projectService.getProjects();
-        // 始终使用 Supabase 返回的数据（包括空数组，表示所有项目已被删除）
         setProjects(supabaseProjects);
       } catch (error) {
-        console.warn('Supabase 加载失败，使用默认数据:', error);
-        // 仅在加载失败时才使用默认数据
-        setProjects(INITIAL_PROJECTS);
+        console.warn('Supabase 加载失败，尝试 localStorage 本地缓存:', error);
+        // 优先读本地缓存，实在没有再用初始数据
+        const saved = localStorage.getItem('guaiyu_projects_list');
+        if (saved) {
+          try {
+            setProjects(JSON.parse(saved));
+          } catch {
+            setProjects(INITIAL_PROJECTS);
+          }
+        } else {
+          setProjects(INITIAL_PROJECTS);
+        }
       } finally {
         setDataLoading(false);
       }
