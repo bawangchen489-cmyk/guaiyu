@@ -98,10 +98,10 @@ export async function loginWithCodename(
 }
 
 /**
- * 获取用户信息（从 localStorage 或创建游客）
+ * 获取用户信息（从 sessionStorage 或创建游客）
  */
 export function getCurrentUser(): UserInfo {
-    const saved = localStorage.getItem('guaiyu_user_info')
+    const saved = sessionStorage.getItem('guaiyu_user_info')
     if (saved) {
         try {
             return JSON.parse(saved)
@@ -113,17 +113,17 @@ export function getCurrentUser(): UserInfo {
 }
 
 /**
- * 保存用户信息到 localStorage
+ * 保存用户信息到 sessionStorage
  */
 export function saveUserToLocal(userInfo: UserInfo): void {
-    localStorage.setItem('guaiyu_user_info', JSON.stringify(userInfo))
+    sessionStorage.setItem('guaiyu_user_info', JSON.stringify(userInfo))
 }
 
 /**
  * 退出登录
  */
 export function logout(): UserInfo {
-    localStorage.removeItem('guaiyu_user_info')
+    sessionStorage.removeItem('guaiyu_user_info')
     localStorage.removeItem('guaiyu_liked_projects')
     return GUEST_USER
 }

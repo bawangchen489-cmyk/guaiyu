@@ -115,9 +115,16 @@ export async function getProject(id: number | string): Promise<Project | null> {
  * 创建新项目
  */
 export async function createProject(project: Omit<Project, 'id'>): Promise<Project> {
+    const newProject = { ...project, id: Date.now() } as Project
     if (!isSupabaseConfigured) {
-        // 本地模式：返回带临时 ID 的项目
-        return { ...project, id: Date.now() } as Project
+        try {
+            const projects = await getProjects()
+            projects.unshift(newProject)
+            localStorage.setItem('guaiyu_projects_list', JSON.stringify(projects))
+        } catch (e) {
+            console.error('Failed to save project to localStorage:', e)
+        }
+        return newProject
     }
 
     const row = projectToRow(project)
@@ -130,8 +137,15 @@ export async function createProject(project: Omit<Project, 'id'>): Promise<Proje
 
     if (error) {
         console.error('Error creating project:', error)
-        // 回退：返回带临时 ID 的项目
-        return { ...project, id: Date.now() } as Project
+        // 回退：本地模式存储
+        try {
+            const projects = await getProjects()
+            projects.unshift(newProject)
+            localStorage.setItem('guaiyu_projects_list', JSON.stringify(projects))
+        } catch (e) {
+            console.error('Failed to save fallback project to localStorage:', e)
+        }
+        return newProject
     }
 
     return rowToProject(data)
@@ -142,6 +156,13 @@ export async function createProject(project: Omit<Project, 'id'>): Promise<Proje
  */
 export async function updateProject(id: number | string, updates: Partial<Project>): Promise<Project> {
     if (!isSupabaseConfigured) {
+        try {
+            const projects = await getProjects()
+            const updated = projects.map(p => String(p.id) === String(id) ? { ...p, ...updates } : p)
+            localStorage.setItem('guaiyu_projects_list', JSON.stringify(updated))
+        } catch (e) {
+            console.error('Failed to update project in localStorage:', e)
+        }
         return { id, ...updates } as Project
     }
 
@@ -156,6 +177,14 @@ export async function updateProject(id: number | string, updates: Partial<Projec
 
     if (error) {
         console.error('Error updating project:', error)
+        // 尝试本地更新回退
+        try {
+            const projects = await getProjects()
+            const updated = projects.map(p => String(p.id) === String(id) ? { ...p, ...updates } : p)
+            localStorage.setItem('guaiyu_projects_list', JSON.stringify(updated))
+        } catch (e) {
+            console.error('Failed to update project in localStorage fallback:', e)
+        }
         return { id, ...updates } as Project
     }
 
@@ -166,8 +195,19 @@ export async function updateProject(id: number | string, updates: Partial<Projec
  * 删除项目
  */
 export async function deleteProject(id: number | string): Promise<void> {
+    const deleteLocal = async () => {
+        try {
+            const projects = await getProjects()
+            const filtered = projects.filter(p => String(p.id) !== String(id))
+            localStorage.setItem('guaiyu_projects_list', JSON.stringify(filtered))
+        } catch (e) {
+            console.error('Failed to delete project from localStorage:', e)
+        }
+    }
+
     if (!isSupabaseConfigured) {
-        return // 本地模式：App.tsx 已处理本地删除
+        await deleteLocal()
+        return
     }
 
     const { error } = await supabase
@@ -177,6 +217,8 @@ export async function deleteProject(id: number | string): Promise<void> {
 
     if (error) {
         console.error('Error deleting project:', error)
+        // 尝试本地删除回退
+        await deleteLocal()
     }
 }
 
