@@ -10,18 +10,22 @@ export async function getComments(projectId: number | string): Promise<Comment[]
         return saved ? JSON.parse(saved) : []
     }
 
-    const { data, error } = await supabase
-        .from('comments')
-        .select('*')
-        .eq('project_id', projectId)
-        .order('created_at', { ascending: false })
+    try {
+        const { data, error } = await supabase
+            .from('comments')
+            .select('*')
+            .eq('project_id', projectId)
+            .order('created_at', { ascending: false })
 
-    if (error) {
-        console.error('Error fetching comments:', error)
-        return []
+        if (error) {
+            throw error
+        }
+        return data || []
+    } catch (err) {
+        console.warn('⚠️ Supabase 获取评论失败，使用本地 localStorage 缓存。错误:', err)
+        const saved = localStorage.getItem(`guaiyu_comments_${projectId}`)
+        return saved ? JSON.parse(saved) : []
     }
-
-    return data || []
 }
 
 /**
@@ -40,49 +44,79 @@ export async function addComment(
         content: content.trim(),
     }
 
-    if (!isSupabaseConfigured) {
-        const localComment: Comment = {
-            ...comment,
-            id: Date.now(),
-            created_at: new Date().toISOString(),
-        }
+    const localComment: Comment = {
+        ...comment,
+        id: Date.now(),
+        created_at: new Date().toISOString(),
+    }
+
+    const saveLocal = () => {
         const key = `guaiyu_comments_${projectId}`
         const saved = localStorage.getItem(key)
         const comments = saved ? JSON.parse(saved) : []
         comments.unshift(localComment)
         localStorage.setItem(key, JSON.stringify(comments))
+    }
+
+    if (!isSupabaseConfigured) {
+        saveLocal()
         return localComment
     }
 
-    const { data, error } = await supabase
-        .from('comments')
-        .insert([comment])
-        .select()
-        .single()
+    try {
+        const { data, error } = await supabase
+            .from('comments')
+            .insert([comment])
+            .select()
+            .single()
 
-    if (error) {
-        console.error('Error adding comment:', error)
-        return null
+        if (error) {
+            throw error
+        }
+        return data
+    } catch (err) {
+        console.warn('⚠️ Supabase 发表评论失败，自动降级存入本地 localStorage。错误:', err)
+        saveLocal()
+        return localComment
     }
-
-    return data
 }
 
 /**
  * 删除评论（管理员）
  */
 export async function deleteComment(commentId: number): Promise<void> {
+    const deleteLocal = () => {
+        for (let i = 0; i < localStorage.length; i++) {
+            const key = localStorage.key(i)
+            if (key && key.startsWith('guaiyu_comments_')) {
+                try {
+                    const comments: Comment[] = JSON.parse(localStorage.getItem(key) || '[]')
+                    const filtered = comments.filter(c => c.id !== commentId)
+                    if (filtered.length !== comments.length) {
+                        localStorage.setItem(key, JSON.stringify(filtered))
+                    }
+                } catch {}
+            }
+        }
+    }
+
     if (!isSupabaseConfigured) {
+        deleteLocal()
         return
     }
 
-    const { error } = await supabase
-        .from('comments')
-        .delete()
-        .eq('id', commentId)
+    try {
+        const { error } = await supabase
+            .from('comments')
+            .delete()
+            .eq('id', commentId)
 
-    if (error) {
-        console.error('Error deleting comment:', error)
+        if (error) {
+            throw error
+        }
+    } catch (err) {
+        console.warn('⚠️ Supabase 删除评论失败，尝试在本地删除。错误:', err)
+        deleteLocal()
     }
 }
 
@@ -90,22 +124,42 @@ export async function deleteComment(commentId: number): Promise<void> {
  * 获取所有项目的评论数量
  */
 export async function getCommentCounts(): Promise<Record<number, number>> {
+    const getLocalCounts = () => {
+        const counts: Record<number, number> = {}
+        for (let i = 0; i < localStorage.length; i++) {
+            const key = localStorage.key(i)
+            if (key && key.startsWith('guaiyu_comments_')) {
+                const projectId = Number(key.replace('guaiyu_comments_', ''))
+                try {
+                    const comments = JSON.parse(localStorage.getItem(key) || '[]')
+                    counts[projectId] = comments.length
+                } catch {}
+            }
+        }
+        return counts
+    }
+
     if (!isSupabaseConfigured) {
-        return {}
+        return getLocalCounts()
     }
 
-    const { data, error } = await supabase
-        .from('comments')
-        .select('project_id')
+    try {
+        const { data, error } = await supabase
+            .from('comments')
+            .select('project_id')
 
-    if (error) {
-        console.error('Error fetching comment counts:', error)
-        return {}
+        if (error) {
+            throw error
+        }
+
+        const counts: Record<number, number> = {}
+        ;(data || []).forEach((row: { project_id: number }) => {
+            counts[row.project_id] = (counts[row.project_id] || 0) + 1
+        })
+        return counts
+    } catch (err) {
+        console.warn('⚠️ Supabase 获取评论数失败，回退计算本地评论数。错误:', err)
+        return getLocalCounts()
     }
-
-    const counts: Record<number, number> = {}
-    ;(data || []).forEach((row: { project_id: number }) => {
-        counts[row.project_id] = (counts[row.project_id] || 0) + 1
-    })
-    return counts
 }
+
