@@ -88,41 +88,53 @@ const ProjectDetailView: React.FC<ProjectDetailViewProps> = ({ project, isLiked,
     }
   };
   
+  // 安全的内容解析器：按行分割，避免对超长 Base64 字符串使用正则导致灵魂掉
   const renderContent = (text: string | undefined) => {
     if (!text) return null;
-    return text.split(/(!\[.*?\]\(.*?\))/g).map((part, index) => {
-      const match = part.match(/!\[(.*?)\]\((.*?)\)/);
-      if (match) {
-        const altText = match[1];
-        const mediaUrl = match[2];
-        const isVideo = altText.startsWith('video:');
-        
+    const lines = text.split('\n');
+    return lines.map((line, index) => {
+      const trimmed = line.trim();
+      // 匹配 markdown 图片/视频语法：![...](...)  注意：不用正则，用字符串查找
+      if (trimmed.startsWith('![') && trimmed.includes('](') && trimmed.endsWith(')')) {
+        const closeBracket = trimmed.indexOf('](');
+        const altText = trimmed.slice(2, closeBracket);
+        const mediaUrl = trimmed.slice(closeBracket + 2, trimmed.length - 1);
+        const isVideo = altText.startsWith('video:') ||
+          mediaUrl.startsWith('blob:') ||
+          mediaUrl.includes('.mp4') ||
+          mediaUrl.includes('.webm') ||
+          mediaUrl.includes('.mov');
         if (isVideo) {
           return (
-            <video 
-              key={index} 
-              src={mediaUrl} 
-              controls 
-              muted 
-              loop 
-              playsInline 
+            <video
+              key={index}
+              src={mediaUrl}
+              controls
+              muted
+              loop
+              playsInline
               className="w-full rounded-2xl my-8 shadow-lg bg-black/5"
             />
           );
         } else {
           return (
-            <img 
-              key={index} 
-              src={mediaUrl} 
-              className="w-full rounded-2xl my-8 shadow-lg" 
-              alt={altText} 
+            <img
+              key={index}
+              src={mediaUrl}
+              className="w-full rounded-2xl my-8 shadow-lg"
+              alt={altText}
             />
           );
         }
       }
-      return part.trim() && <p key={index} className={`${isDark ? 'text-gray-400' : 'text-gray-600'} leading-loose text-lg mb-6 whitespace-pre-wrap`}>{part}</p>;
+      return trimmed ? (
+        <p key={index} className={`${isDark ? 'text-gray-400' : 'text-gray-600'} leading-loose text-lg mb-2 whitespace-pre-wrap`}>
+          {line}
+        </p>
+      ) : null;
     });
   };
+
 
   const isCoverVideo = 
     project.image?.includes('#video') || 

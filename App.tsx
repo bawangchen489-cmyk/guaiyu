@@ -1,4 +1,3 @@
-
 import React, { useState, useEffect, useCallback } from 'react';
 import { AnimatePresence, motion } from 'framer-motion';
 import { INITIAL_PROJECTS, DEFAULT_AVATAR_URL } from './constants';
@@ -11,12 +10,44 @@ import AboutView from './views/AboutView';
 import UploadView from './views/UploadView';
 import ProjectDetailView from './views/ProjectDetailView';
 import LoginView from './views/LoginView';
-import { Trash2, AlertTriangle, X } from 'lucide-react';
+import { Trash2, AlertTriangle, ArrowLeft } from 'lucide-react';
 
 // Supabase services
 import * as projectService from './services/projectService';
 import * as authService from './services/authService';
 import * as commentService from './services/commentService';
+
+// 错误边界 - 防止子组件崩溃导致白屏
+class ErrorBoundary extends React.Component<
+  { children: React.ReactNode; onBack: () => void },
+  { hasError: boolean }
+> {
+  constructor(props: any) {
+    super(props);
+    this.state = { hasError: false };
+  }
+  static getDerivedStateFromError() { return { hasError: true }; }
+  componentDidCatch(err: any) { console.error('ProjectDetail render error:', err); }
+  render() {
+    if (this.state.hasError) {
+      return (
+        <div className="min-h-screen bg-[#0a0a0a] text-white flex flex-col items-center justify-center gap-6 p-8">
+          <div className="text-6xl">😵</div>
+          <h2 className="text-2xl font-black">作品加载出错了</h2>
+          <p className="text-gray-400 text-center max-w-sm">该作品的数据可能损坏，请返回作品列表重新选择。</p>
+          <button
+            onClick={() => { this.setState({ hasError: false }); this.props.onBack(); }}
+            className="flex items-center gap-2 px-6 py-3 bg-[#ff5e3a] text-white font-bold rounded-full"
+          >
+            <ArrowLeft className="w-4 h-4" /> 返回作品列表
+          </button>
+        </div>
+      );
+    }
+    return this.props.children;
+  }
+}
+
 
 export default function App() {
   const [loading, setLoading] = useState(true);
@@ -28,10 +59,12 @@ export default function App() {
   });
   const [selectedProject, setSelectedProject] = useState<Project | null>(() => {
     try {
-      const saved = sessionStorage.getItem('guaiyu_selected_project');
-      return saved ? JSON.parse(saved) : null;
+      // 只存 ID 到 sessionStorage，避免 Base64 图片数据把存储兡爽
+      const savedId = sessionStorage.getItem('guaiyu_selected_project_id');
+      return null; // 对象不存储，依靠 projects 列表匹配
     } catch { return null; }
   });
+
   const [uploadDraft, setUploadDraft] = useState<Partial<Project> | null>(null);
   const [theme, setTheme] = useState<ThemeType>('dark');
   const [scrolled, setScrolled] = useState(false);
@@ -142,11 +175,13 @@ export default function App() {
 
   useEffect(() => {
     if (selectedProject) {
-      sessionStorage.setItem('guaiyu_selected_project', JSON.stringify(selectedProject));
+      // 只存 ID，防止 Base64 图片数据把 sessionStorage 坡満
+      try { sessionStorage.setItem('guaiyu_selected_project_id', String(selectedProject.id)); } catch {}
     } else {
-      sessionStorage.removeItem('guaiyu_selected_project');
+      sessionStorage.removeItem('guaiyu_selected_project_id');
     }
   }, [selectedProject]);
+
 
   useEffect(() => {
     const timer = setTimeout(() => setLoading(false), 1500);
@@ -252,43 +287,51 @@ export default function App() {
         return <WorksView projects={projects} likedIds={likedProjectIds} onLike={handleLikeToggle} onDelete={(id) => setDeleteConfirmId(id)} onProjectClick={(p) => { setSelectedProject(p); setCurrentView('projectDetail'); window.scrollTo(0, 0); }} theme={theme} isAdmin={isAdmin} commentCounts={commentCounts} />;
       case 'projectDetail': {
         const liveProject = projects.find(p => String(p.id) === String(selectedProject?.id)) || selectedProject;
+        if (!liveProject) {
+          // 找不到项目，回到作品列表
+          setCurrentView('works');
+          return null;
+        }
         return (
-          <ProjectDetailView
-            project={liveProject}
-            isLiked={likedProjectIds.includes(Number(selectedProject?.id))}
-            onLike={() => handleLikeToggle(Number(selectedProject?.id))}
-            onDelete={(id) => setDeleteConfirmId(id)}
-            onBack={() => setCurrentView('works')}
-            theme={theme}
-            avatar={userInfo.avatar}
-            isAdmin={isAdmin}
-            comments={projectComments}
-            onAddComment={async (content: string, userName: string) => {
-              const newComment = await commentService.addComment(
-                selectedProject!.id,
-                userName,
-                DEFAULT_AVATAR_URL,
-                content
-              );
-              if (newComment) {
-                setProjectComments(prev => [newComment, ...prev]);
+          <ErrorBoundary onBack={() => setCurrentView('works')}>
+            <ProjectDetailView
+              project={liveProject}
+              isLiked={likedProjectIds.includes(Number(liveProject.id))}
+              onLike={() => handleLikeToggle(Number(liveProject.id))}
+              onDelete={(id) => setDeleteConfirmId(id)}
+              onBack={() => setCurrentView('works')}
+              theme={theme}
+              avatar={userInfo.avatar}
+              isAdmin={isAdmin}
+              comments={projectComments}
+              onAddComment={async (content: string, userName: string) => {
+                const newComment = await commentService.addComment(
+                  liveProject.id,
+                  userName,
+                  DEFAULT_AVATAR_URL,
+                  content
+                );
+                if (newComment) {
+                  setProjectComments(prev => [newComment, ...prev]);
+                  setCommentCounts(prev => ({
+                    ...prev,
+                    [Number(liveProject.id)]: (prev[Number(liveProject.id)] || 0) + 1
+                  }));
+                }
+              }}
+              onDeleteComment={async (commentId: number) => {
+                await commentService.deleteComment(commentId);
+                setProjectComments(prev => prev.filter(c => c.id !== commentId));
                 setCommentCounts(prev => ({
                   ...prev,
-                  [Number(selectedProject!.id)]: (prev[Number(selectedProject!.id)] || 0) + 1
+                  [Number(liveProject.id)]: Math.max(0, (prev[Number(liveProject.id)] || 0) - 1)
                 }));
-              }
-            }}
-            onDeleteComment={async (commentId: number) => {
-              await commentService.deleteComment(commentId);
-              setProjectComments(prev => prev.filter(c => c.id !== commentId));
-              setCommentCounts(prev => ({
-                ...prev,
-                [Number(selectedProject!.id)]: Math.max(0, (prev[Number(selectedProject!.id)] || 0) - 1)
-              }));
-            }}
-          />
+              }}
+            />
+          </ErrorBoundary>
         );
       }
+
       case 'upload':
         return (
           <UploadView
