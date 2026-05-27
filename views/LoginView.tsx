@@ -7,7 +7,7 @@ import { DEFAULT_AVATAR_URL } from '../constants';
 import * as authService from '../services/authService';
 
 // 管理员密码 (生产环境应使用环境变量)
-const ADMIN_PASSWORD = 'guaiyubawan';
+const ADMIN_PASSWORD = 'guaiyu..';
 
 interface LoginViewProps {
   onLogin: (codename: string, name: string, avatar: string) => void;

@@ -1,7 +1,7 @@
 
 import { Project, Experience } from './types';
 
-export const DEFAULT_AVATAR_URL = "https://images.unsplash.com/photo-1579783902614-a3fb39279c23?auto=format&fit=crop&q=80&w=400";
+export const DEFAULT_AVATAR_URL = "data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'%3E%3Ccircle cx='50' cy='50' r='50' fill='%23ff5e3a'/%3E%3Ctext x='50' y='55' text-anchor='middle' dominant-baseline='middle' fill='white' font-size='40' font-family='Arial' font-weight='bold'%3EG%3C/text%3E%3C/svg%3E";
 
 export const INITIAL_PROJECTS: Project[] = [
   {

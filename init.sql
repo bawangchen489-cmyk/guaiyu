@@ -56,6 +56,18 @@ CREATE TABLE IF NOT EXISTS experience (
 );
 
 -- ============================================
+-- 4.5 COMMENTS TABLE
+-- ============================================
+CREATE TABLE IF NOT EXISTS comments (
+    id SERIAL PRIMARY KEY,
+    project_id INTEGER REFERENCES projects(id) ON DELETE CASCADE,
+    user_name TEXT NOT NULL DEFAULT '游客',
+    user_avatar TEXT,
+    content TEXT NOT NULL,
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+);
+
+-- ============================================
 -- 5. RPC FUNCTIONS FOR ATOMIC OPERATIONS
 -- ============================================
 
@@ -106,6 +118,7 @@ ALTER TABLE users ENABLE ROW LEVEL SECURITY;
 ALTER TABLE projects ENABLE ROW LEVEL SECURITY;
 ALTER TABLE user_likes ENABLE ROW LEVEL SECURITY;
 ALTER TABLE experience ENABLE ROW LEVEL SECURITY;
+ALTER TABLE comments ENABLE ROW LEVEL SECURITY;
 
 -- 先删除可能存在的旧策略，避免冲突
 DROP POLICY IF EXISTS "Users are viewable by everyone" ON users;
@@ -122,6 +135,9 @@ DROP POLICY IF EXISTS "Experience is viewable by everyone" ON experience;
 DROP POLICY IF EXISTS "Experience can be inserted" ON experience;
 DROP POLICY IF EXISTS "Experience can be updated" ON experience;
 DROP POLICY IF EXISTS "Experience can be deleted" ON experience;
+DROP POLICY IF EXISTS "Comments are viewable by everyone" ON comments;
+DROP POLICY IF EXISTS "Comments can be created by anyone" ON comments;
+DROP POLICY IF EXISTS "Comments can be deleted by anyone" ON comments;
 
 -- Users: 允许所有人读取，允许创建和更新
 CREATE POLICY "Users are viewable by everyone" ON users FOR SELECT USING (true);
@@ -139,11 +155,16 @@ CREATE POLICY "User likes are viewable by everyone" ON user_likes FOR SELECT USI
 CREATE POLICY "User likes can be created by anyone" ON user_likes FOR INSERT WITH CHECK (true);
 CREATE POLICY "User likes can be deleted by anyone" ON user_likes FOR DELETE USING (true);
 
--- Experience: 允许所有人读取和修改 (分开定义避免冲突)
+-- Experience: 允许所有人读取和修改
 CREATE POLICY "Experience is viewable by everyone" ON experience FOR SELECT USING (true);
 CREATE POLICY "Experience can be inserted" ON experience FOR INSERT WITH CHECK (true);
 CREATE POLICY "Experience can be updated" ON experience FOR UPDATE USING (true);
 CREATE POLICY "Experience can be deleted" ON experience FOR DELETE USING (true);
+
+-- Comments: 允许所有人读取、创建、删除
+CREATE POLICY "Comments are viewable by everyone" ON comments FOR SELECT USING (true);
+CREATE POLICY "Comments can be created by anyone" ON comments FOR INSERT WITH CHECK (true);
+CREATE POLICY "Comments can be deleted by anyone" ON comments FOR DELETE USING (true);
 
 -- ============================================
 -- 7. SEED DATA

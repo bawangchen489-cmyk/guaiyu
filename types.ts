@@ -15,6 +15,15 @@ export interface Project {
   tools: string;
 }
 
+export interface Comment {
+  id: number;
+  project_id: number;
+  user_name: string;
+  user_avatar: string;
+  content: string;
+  created_at: string;
+}
+
 export interface Experience {
   year: string;
   role: string;

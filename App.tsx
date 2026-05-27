@@ -2,7 +2,7 @@
 import React, { useState, useEffect, useCallback } from 'react';
 import { AnimatePresence, motion } from 'framer-motion';
 import { INITIAL_PROJECTS, DEFAULT_AVATAR_URL } from './constants';
-import { Project, ViewType, ThemeType, UserInfo } from './types';
+import { Project, ViewType, ThemeType, UserInfo, Comment } from './types';
 import Navbar from './components/Navbar';
 import SplashScreen from './components/SplashScreen';
 import PersonalHomeView from './views/PersonalHomeView';
@@ -16,12 +16,22 @@ import { Trash2, AlertTriangle, X } from 'lucide-react';
 // Supabase services
 import * as projectService from './services/projectService';
 import * as authService from './services/authService';
+import * as commentService from './services/commentService';
 
 export default function App() {
   const [loading, setLoading] = useState(true);
-  const [hasEntered, setHasEntered] = useState(false);
-  const [currentView, setCurrentView] = useState<ViewType>('home');
-  const [selectedProject, setSelectedProject] = useState<Project | null>(null);
+  const [hasEntered, setHasEntered] = useState(() => {
+    return sessionStorage.getItem('guaiyu_has_entered') === 'true';
+  });
+  const [currentView, setCurrentView] = useState<ViewType>(() => {
+    return (sessionStorage.getItem('guaiyu_current_view') as ViewType) || 'home';
+  });
+  const [selectedProject, setSelectedProject] = useState<Project | null>(() => {
+    try {
+      const saved = sessionStorage.getItem('guaiyu_selected_project');
+      return saved ? JSON.parse(saved) : null;
+    } catch { return null; }
+  });
   const [uploadDraft, setUploadDraft] = useState<Partial<Project> | null>(null);
   const [theme, setTheme] = useState<ThemeType>('dark');
   const [scrolled, setScrolled] = useState(false);
@@ -41,6 +51,10 @@ export default function App() {
   });
 
   const isAdmin = userInfo.status === 'authenticated';
+
+  // 评论系统
+  const [commentCounts, setCommentCounts] = useState<Record<number, number>>({});
+  const [projectComments, setProjectComments] = useState<Comment[]>([]);
 
   // 点赞列表 (这个数据很小，存本地没问题)
   const [likedProjectIds, setLikedProjectIds] = useState<number[]>(() => {
@@ -68,6 +82,36 @@ export default function App() {
     loadProjects();
   }, []);
 
+  // 加载评论数
+  useEffect(() => {
+    async function loadCommentCounts() {
+      try {
+        const counts = await commentService.getCommentCounts();
+        setCommentCounts(counts);
+      } catch (error) {
+        console.warn('Failed to load comment counts:', error);
+      }
+    }
+    loadCommentCounts();
+  }, []);
+
+  // 当选中项目变化时，加载该项目的评论
+  useEffect(() => {
+    if (!selectedProject) {
+      setProjectComments([]);
+      return;
+    }
+    async function loadComments() {
+      try {
+        const comments = await commentService.getComments(selectedProject!.id);
+        setProjectComments(comments);
+      } catch (error) {
+        console.warn('Failed to load comments:', error);
+      }
+    }
+    loadComments();
+  }, [selectedProject?.id]);
+
   // ✅ 修改点3：删除了那个把 projects 存入 localStorage 的 useEffect
   // 原来的代码在这里会导致 quota exceeded 错误，现在直接依靠 Supabase 数据库即可
 
@@ -80,6 +124,23 @@ export default function App() {
   useEffect(() => {
     localStorage.setItem('guaiyu_liked_projects', JSON.stringify(likedProjectIds));
   }, [likedProjectIds]);
+
+  // 持久化 hasEntered, currentView, selectedProject 到 sessionStorage
+  useEffect(() => {
+    sessionStorage.setItem('guaiyu_has_entered', String(hasEntered));
+  }, [hasEntered]);
+
+  useEffect(() => {
+    sessionStorage.setItem('guaiyu_current_view', currentView);
+  }, [currentView]);
+
+  useEffect(() => {
+    if (selectedProject) {
+      sessionStorage.setItem('guaiyu_selected_project', JSON.stringify(selectedProject));
+    } else {
+      sessionStorage.removeItem('guaiyu_selected_project');
+    }
+  }, [selectedProject]);
 
   useEffect(() => {
     const timer = setTimeout(() => setLoading(false), 1500);
@@ -182,7 +243,7 @@ export default function App() {
       case 'home':
         return <PersonalHomeView onNavigate={setCurrentView} projects={projects} avatar={userInfo.avatar} theme={theme} />;
       case 'works':
-        return <WorksView projects={projects} likedIds={likedProjectIds} onLike={handleLikeToggle} onDelete={(id) => setDeleteConfirmId(id)} onProjectClick={(p) => { setSelectedProject(p); setCurrentView('projectDetail'); window.scrollTo(0, 0); }} theme={theme} isAdmin={isAdmin} />;
+        return <WorksView projects={projects} likedIds={likedProjectIds} onLike={handleLikeToggle} onDelete={(id) => setDeleteConfirmId(id)} onProjectClick={(p) => { setSelectedProject(p); setCurrentView('projectDetail'); window.scrollTo(0, 0); }} theme={theme} isAdmin={isAdmin} commentCounts={commentCounts} />;
       case 'projectDetail': {
         const liveProject = projects.find(p => String(p.id) === String(selectedProject?.id)) || selectedProject;
         return (
@@ -195,6 +256,30 @@ export default function App() {
             theme={theme}
             avatar={userInfo.avatar}
             isAdmin={isAdmin}
+            comments={projectComments}
+            onAddComment={async (content: string, userName: string) => {
+              const newComment = await commentService.addComment(
+                selectedProject!.id,
+                userName,
+                DEFAULT_AVATAR_URL,
+                content
+              );
+              if (newComment) {
+                setProjectComments(prev => [newComment, ...prev]);
+                setCommentCounts(prev => ({
+                  ...prev,
+                  [Number(selectedProject!.id)]: (prev[Number(selectedProject!.id)] || 0) + 1
+                }));
+              }
+            }}
+            onDeleteComment={async (commentId: number) => {
+              await commentService.deleteComment(commentId);
+              setProjectComments(prev => prev.filter(c => c.id !== commentId));
+              setCommentCounts(prev => ({
+                ...prev,
+                [Number(selectedProject!.id)]: Math.max(0, (prev[Number(selectedProject!.id)] || 0) - 1)
+              }));
+            }}
           />
         );
       }

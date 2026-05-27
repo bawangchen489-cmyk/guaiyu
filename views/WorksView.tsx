@@ -1,8 +1,9 @@
 
 import React, { useState } from 'react';
 import { motion } from 'framer-motion';
-import { Heart, Trash2, Play } from 'lucide-react';
+import { Heart, Trash2, Play, MessageCircle } from 'lucide-react';
 import { Project, ThemeType } from '../types';
+import { DEFAULT_AVATAR_URL } from '../constants';
 
 interface WorksViewProps {
   onProjectClick: (project: Project) => void;
@@ -12,6 +13,7 @@ interface WorksViewProps {
   onDelete: (id: number | string) => void;
   theme: ThemeType;
   isAdmin: boolean;
+  commentCounts?: Record<number, number>;
 }
 
 const ProjectCard: React.FC<{
@@ -22,7 +24,8 @@ const ProjectCard: React.FC<{
   onClick: (p: Project) => void;
   theme: ThemeType;
   isAdmin: boolean;
-}> = ({ project, isLiked, onLike, onDelete, onClick, theme, isAdmin }) => {
+  commentCount: number;
+}> = ({ project, isLiked, onLike, onDelete, onClick, theme, isAdmin, commentCount }) => {
   const isDark = theme === 'dark';
   const isVideo = project.image.includes('video') || project.category === 'AI作品/视频';
   const [isHovered, setIsHovered] = useState(false);
@@ -32,48 +35,15 @@ const ProjectCard: React.FC<{
       initial={{ opacity: 0, y: 20 }}
       whileInView={{ opacity: 1, y: 0 }}
       viewport={{ once: true }}
-      className="group relative mb-8 break-inside-avoid"
+      className="group relative mb-6 break-inside-avoid"
       onMouseEnter={() => setIsHovered(true)}
       onMouseLeave={() => setIsHovered(false)}
     >
-      <div className={`relative overflow-hidden rounded-[2.5rem] ${isDark ? 'bg-[#1a1a1a] border-white/5' : 'bg-white border-black/5 shadow-xl shadow-black/5'} border hover:border-[#ff5e3a] transition-all duration-500`}>
-
-        {/* 最高优先级的按钮层 */}
-        <div className="absolute top-6 right-6 flex gap-3 z-[999]">
-          {/* 点赞 */}
-          <button
-            type="button"
-            onClick={(e) => {
-              e.preventDefault();
-              e.stopPropagation();
-              onLike(Number(project.id));
-            }}
-            className={`p-3.5 rounded-full backdrop-blur-md transition-all shadow-xl cursor-pointer pointer-events-auto border border-white/20 ${isLiked ? 'bg-[#ff5e3a] text-white' : 'bg-black/60 text-white/90 hover:bg-black/80'}`}
-          >
-            <Heart className={`w-5 h-5 ${isLiked ? 'fill-current' : ''}`} />
-            <span className="absolute -bottom-1 -right-1 bg-white text-black text-[10px] px-1.5 py-0.5 rounded-md font-black shadow-md">{project.likes}</span>
-          </button>
-
-          {/* 删除按钮 */}
-          {isAdmin && (
-            <button
-              type="button"
-              onClick={(e) => {
-                e.preventDefault();
-                e.stopPropagation();
-                onDelete(project.id);
-              }}
-              className={`p-3.5 rounded-full bg-red-600 text-white hover:bg-red-500 backdrop-blur-md transition-all shadow-xl border border-white/30 cursor-pointer pointer-events-auto opacity-70 hover:opacity-100`}
-              style={{ transition: 'all 0.3s cubic-bezier(0.175, 0.885, 0.32, 1.275)' }}
-              title="删除此作品"
-            >
-              <Trash2 className="w-5 h-5" />
-            </button>
-          )}
-        </div>
-
-        {/* 卡片主点击区 */}
-        <div onClick={() => onClick(project)} className="relative z-10 cursor-pointer">
+      <div
+        className={`relative overflow-hidden rounded-2xl ${isDark ? 'bg-[#1a1a1a] border-white/5' : 'bg-white border-black/5 shadow-lg shadow-black/5'} border hover:border-[#ff5e3a]/50 transition-all duration-500 hover:-translate-y-1 hover:shadow-2xl ${isDark ? 'hover:shadow-[#ff5e3a]/5' : 'hover:shadow-black/10'}`}
+      >
+        {/* 图片区域 */}
+        <div onClick={() => onClick(project)} className="relative cursor-pointer overflow-hidden">
           {isVideo ? (
             <div className="relative aspect-video">
               <video
@@ -90,9 +60,86 @@ const ProjectCard: React.FC<{
             <img src={project.image} alt={project.title} className="w-full h-auto object-cover transition-transform duration-700 group-hover:scale-105" />
           )}
 
-          <div className="absolute inset-0 bg-gradient-to-t from-black/95 via-black/30 to-transparent flex flex-col justify-end p-8 opacity-0 group-hover:opacity-100 transition-opacity duration-500">
-            <span className="text-[#ff5e3a] text-[10px] font-black uppercase mb-2 block tracking-widest">{project.category}</span>
-            <h3 className="text-2xl font-black text-white tracking-tight leading-tight">{project.title}</h3>
+          {/* hover 遮罩 - 只显示分类标签 */}
+          <div className="absolute inset-0 bg-gradient-to-t from-black/60 via-transparent to-transparent opacity-0 group-hover:opacity-100 transition-opacity duration-500 pointer-events-none" />
+        </div>
+
+        {/* 底部信息栏 */}
+        <div className={`px-5 py-4 ${isDark ? 'bg-[#1a1a1a]' : 'bg-white'}`}>
+          {/* 标题 */}
+          <h3
+            onClick={() => onClick(project)}
+            className={`font-bold text-[15px] mb-3 leading-snug cursor-pointer truncate ${isDark ? 'text-white hover:text-[#ff5e3a]' : 'text-gray-900 hover:text-[#ff5e3a]'} transition-colors`}
+          >
+            {project.title}
+          </h3>
+
+          {/* 作者 + 操作按钮 */}
+          <div className="flex items-center justify-between">
+            {/* 左：作者 */}
+            <div className="flex items-center gap-2 min-w-0">
+              <img
+                src={project.avatar || DEFAULT_AVATAR_URL}
+                className="w-6 h-6 rounded-full object-cover border border-white/10 shrink-0"
+                alt={project.author}
+                onError={(e) => { (e.target as HTMLImageElement).src = DEFAULT_AVATAR_URL; }}
+              />
+              <span className={`text-xs font-medium truncate ${isDark ? 'text-gray-400' : 'text-gray-500'}`}>
+                {project.author}
+              </span>
+            </div>
+
+            {/* 右：评论数 + 点赞 + 删除 */}
+            <div className="flex items-center gap-1 shrink-0">
+              {/* 评论数 */}
+              <button
+                type="button"
+                onClick={(e) => {
+                  e.stopPropagation();
+                  onClick(project);
+                }}
+                className={`flex items-center gap-1 px-2 py-1.5 rounded-lg text-xs font-bold transition-all ${isDark ? 'text-gray-400 hover:text-white hover:bg-white/5' : 'text-gray-400 hover:text-gray-700 hover:bg-gray-100'}`}
+              >
+                <MessageCircle className="w-3.5 h-3.5" />
+                <span>{commentCount || 0}</span>
+              </button>
+
+              {/* 点赞 */}
+              <button
+                type="button"
+                onClick={(e) => {
+                  e.preventDefault();
+                  e.stopPropagation();
+                  onLike(Number(project.id));
+                }}
+                className={`flex items-center gap-1 px-2 py-1.5 rounded-lg text-xs font-bold transition-all cursor-pointer ${
+                  isLiked
+                    ? 'text-[#ff5e3a] bg-[#ff5e3a]/10'
+                    : isDark
+                      ? 'text-gray-400 hover:text-[#ff5e3a] hover:bg-white/5'
+                      : 'text-gray-400 hover:text-[#ff5e3a] hover:bg-gray-100'
+                }`}
+              >
+                <Heart className={`w-3.5 h-3.5 ${isLiked ? 'fill-current' : ''}`} />
+                <span>{project.likes}</span>
+              </button>
+
+              {/* 管理员删除 */}
+              {isAdmin && (
+                <button
+                  type="button"
+                  onClick={(e) => {
+                    e.preventDefault();
+                    e.stopPropagation();
+                    onDelete(project.id);
+                  }}
+                  className={`p-1.5 rounded-lg transition-all cursor-pointer opacity-0 group-hover:opacity-100 ${isDark ? 'text-gray-500 hover:text-red-500 hover:bg-red-500/10' : 'text-gray-300 hover:text-red-500 hover:bg-red-50'}`}
+                  title="删除此作品"
+                >
+                  <Trash2 className="w-3.5 h-3.5" />
+                </button>
+              )}
+            </div>
           </div>
         </div>
       </div>
@@ -100,7 +147,7 @@ const ProjectCard: React.FC<{
   );
 };
 
-const WorksView: React.FC<WorksViewProps> = ({ onProjectClick, projects, likedIds, onLike, onDelete, theme, isAdmin }) => {
+const WorksView: React.FC<WorksViewProps> = ({ onProjectClick, projects, likedIds, onLike, onDelete, theme, isAdmin, commentCounts = {} }) => {
   const [activeFilter, setActiveFilter] = useState("全部");
   const filters = ["全部", "电商设计", "品牌设计", "包装设计", "AI作品/视频"];
   const filteredProjects = activeFilter === "全部" ? projects : projects.filter(p => p.category === activeFilter);
@@ -115,7 +162,7 @@ const WorksView: React.FC<WorksViewProps> = ({ onProjectClick, projects, likedId
             <button key={f} onClick={() => setActiveFilter(f)} className={`text-sm font-bold whitespace-nowrap px-6 py-2.5 rounded-full transition-all ${activeFilter === f ? 'bg-[#ff5e3a] text-white shadow-lg shadow-[#ff5e3a]/20' : isDark ? 'text-gray-400 hover:text-white bg-white/5' : 'text-gray-600 hover:text-black bg-white shadow-sm border border-black/5'}`}>{f}</button>
           ))}
         </div>
-        <div className="columns-1 sm:columns-2 lg:columns-3 gap-8 space-y-8">
+        <div className="columns-1 sm:columns-2 lg:columns-3 gap-6 space-y-6">
           {filteredProjects.map((project) => (
             <ProjectCard
               key={project.id}
@@ -126,6 +173,7 @@ const WorksView: React.FC<WorksViewProps> = ({ onProjectClick, projects, likedId
               onClick={onProjectClick}
               theme={theme}
               isAdmin={isAdmin}
+              commentCount={commentCounts[Number(project.id)] || 0}
             />
           ))}
         </div>

@@ -1,9 +1,26 @@
 
 import React, { useState } from 'react';
-import { ArrowLeft, Heart, Share2, Check, Trash2 } from 'lucide-react';
+import { ArrowLeft, Heart, Share2, Check, Trash2, MessageCircle, Send } from 'lucide-react';
 import { motion, AnimatePresence } from 'framer-motion';
-import { Project, ThemeType } from '../types';
+import { Project, ThemeType, Comment } from '../types';
 import { DEFAULT_AVATAR_URL } from '../constants';
+
+function timeAgo(dateStr: string): string {
+  const now = Date.now();
+  const then = new Date(dateStr).getTime();
+  const diff = Math.max(0, now - then);
+  const seconds = Math.floor(diff / 1000);
+  if (seconds < 60) return '刚刚';
+  const minutes = Math.floor(seconds / 60);
+  if (minutes < 60) return `${minutes}分钟前`;
+  const hours = Math.floor(minutes / 60);
+  if (hours < 24) return `${hours}小时前`;
+  const days = Math.floor(hours / 24);
+  if (days < 30) return `${days}天前`;
+  const months = Math.floor(days / 30);
+  if (months < 12) return `${months}个月前`;
+  return `${Math.floor(months / 12)}年前`;
+}
 
 interface ProjectDetailViewProps {
   project: Partial<Project> | null;
@@ -14,10 +31,17 @@ interface ProjectDetailViewProps {
   avatar: string;
   theme: ThemeType;
   isAdmin?: boolean;
+  comments?: Comment[];
+  onAddComment?: (content: string, userName: string) => void;
+  onDeleteComment?: (commentId: number) => void;
 }
 
-const ProjectDetailView: React.FC<ProjectDetailViewProps> = ({ project, isLiked, onLike, onDelete, onBack, avatar, theme, isAdmin }) => {
+const ProjectDetailView: React.FC<ProjectDetailViewProps> = ({ project, isLiked, onLike, onDelete, onBack, avatar, theme, isAdmin, comments = [], onAddComment, onDeleteComment }) => {
   const [showCopyMsg, setShowCopyMsg] = useState(false);
+  const [commentText, setCommentText] = useState('');
+  const [guestName, setGuestName] = useState('');
+  const [isSubmitting, setIsSubmitting] = useState(false);
+
   if (!project) return null;
   const isDark = theme === 'dark';
 
@@ -50,6 +74,17 @@ const ProjectDetailView: React.FC<ProjectDetailViewProps> = ({ project, isLiked,
       }
     } else {
       copyToClipboard();
+    }
+  };
+
+  const handleSubmitComment = async () => {
+    if (!commentText.trim() || !onAddComment) return;
+    setIsSubmitting(true);
+    try {
+      await onAddComment(commentText.trim(), guestName.trim() || '游客');
+      setCommentText('');
+    } finally {
+      setIsSubmitting(false);
     }
   };
   
@@ -167,6 +202,120 @@ const ProjectDetailView: React.FC<ProjectDetailViewProps> = ({ project, isLiked,
                         </div>
                     </div>
                 </div>
+            </div>
+
+            {/* ========== 评论区 ========== */}
+            <div className={`mt-16 pt-12 border-t ${isDark ? 'border-white/5' : 'border-gray-200'}`}>
+              <div className="flex items-center gap-3 mb-10">
+                <MessageCircle className="w-6 h-6 text-[#ff5e3a]" />
+                <h3 className="text-2xl font-black italic">评论 / COMMENTS</h3>
+                <span className="bg-[#ff5e3a] text-white text-xs font-black px-2.5 py-1 rounded-full min-w-[24px] text-center">
+                  {comments.length}
+                </span>
+              </div>
+
+              {/* 评论输入区 */}
+              <div className={`${isDark ? 'bg-[#111] border-white/5' : 'bg-gray-50 border-gray-200'} border rounded-2xl p-6 mb-10`}>
+                <div className="flex gap-4">
+                  <div className="shrink-0 pt-1">
+                    <div className="w-10 h-10 rounded-full bg-gradient-to-br from-[#ff5e3a] to-[#ff2d7c] flex items-center justify-center text-white font-black text-sm">
+                      {(guestName || '游')[0]}
+                    </div>
+                  </div>
+                  <div className="flex-1 space-y-3">
+                    <input
+                      type="text"
+                      placeholder="你的名字"
+                      value={guestName}
+                      onChange={(e) => setGuestName(e.target.value)}
+                      className={`w-full max-w-[200px] px-4 py-2 rounded-xl text-sm font-medium outline-none transition-all ${isDark ? 'bg-white/5 text-white placeholder-gray-500 focus:bg-white/10 border border-white/5 focus:border-[#ff5e3a]/50' : 'bg-white text-black placeholder-gray-400 focus:bg-white border border-gray-200 focus:border-[#ff5e3a]/50'}`}
+                    />
+                    <textarea
+                      placeholder="写下你的评论..."
+                      value={commentText}
+                      onChange={(e) => setCommentText(e.target.value)}
+                      rows={3}
+                      className={`w-full px-4 py-3 rounded-xl text-sm font-medium outline-none resize-none transition-all ${isDark ? 'bg-white/5 text-white placeholder-gray-500 focus:bg-white/10 border border-white/5 focus:border-[#ff5e3a]/50' : 'bg-white text-black placeholder-gray-400 focus:bg-white border border-gray-200 focus:border-[#ff5e3a]/50'}`}
+                      onKeyDown={(e) => {
+                        if (e.key === 'Enter' && (e.metaKey || e.ctrlKey)) {
+                          handleSubmitComment();
+                        }
+                      }}
+                    />
+                    <div className="flex items-center justify-between">
+                      <span className={`text-xs ${isDark ? 'text-gray-600' : 'text-gray-400'}`}>Ctrl + Enter 快速发送</span>
+                      <button
+                        type="button"
+                        onClick={handleSubmitComment}
+                        disabled={!commentText.trim() || isSubmitting}
+                        className={`flex items-center gap-2 px-5 py-2.5 rounded-xl font-bold text-sm transition-all cursor-pointer ${
+                          commentText.trim() && !isSubmitting
+                            ? 'bg-[#ff5e3a] text-white shadow-lg shadow-[#ff5e3a]/20 hover:shadow-[#ff5e3a]/40 hover:-translate-y-0.5'
+                            : isDark ? 'bg-white/5 text-gray-600 cursor-not-allowed' : 'bg-gray-200 text-gray-400 cursor-not-allowed'
+                        }`}
+                      >
+                        <Send className="w-3.5 h-3.5" />
+                        {isSubmitting ? '发送中...' : '发布评论'}
+                      </button>
+                    </div>
+                  </div>
+                </div>
+              </div>
+
+              {/* 评论列表 */}
+              {comments.length === 0 ? (
+                <div className={`text-center py-16 ${isDark ? 'text-gray-600' : 'text-gray-400'}`}>
+                  <MessageCircle className="w-12 h-12 mx-auto mb-4 opacity-30" />
+                  <p className="font-bold text-lg">暂无评论，来说两句吧 🎨</p>
+                </div>
+              ) : (
+                <div className="space-y-1">
+                  <AnimatePresence>
+                    {comments.map((comment) => (
+                      <motion.div
+                        key={comment.id}
+                        initial={{ opacity: 0, y: 12 }}
+                        animate={{ opacity: 1, y: 0 }}
+                        exit={{ opacity: 0, y: -12 }}
+                        transition={{ duration: 0.3 }}
+                        className={`group/comment flex gap-4 p-5 rounded-2xl transition-colors ${isDark ? 'hover:bg-white/[0.02]' : 'hover:bg-gray-50'}`}
+                      >
+                        <div className="shrink-0">
+                          <img
+                            src={comment.user_avatar || DEFAULT_AVATAR_URL}
+                            alt={comment.user_name}
+                            className="w-10 h-10 rounded-full object-cover border-2 border-transparent"
+                            onError={(e) => { (e.target as HTMLImageElement).src = DEFAULT_AVATAR_URL; }}
+                          />
+                        </div>
+                        <div className="flex-1 min-w-0">
+                          <div className="flex items-center gap-3 mb-1.5">
+                            <span className={`font-bold text-sm ${isDark ? 'text-white' : 'text-gray-900'}`}>
+                              {comment.user_name}
+                            </span>
+                            <span className={`text-xs ${isDark ? 'text-gray-600' : 'text-gray-400'}`}>
+                              {timeAgo(comment.created_at)}
+                            </span>
+                          </div>
+                          <p className={`text-sm leading-relaxed ${isDark ? 'text-gray-300' : 'text-gray-600'} whitespace-pre-wrap break-words`}>
+                            {comment.content}
+                          </p>
+                        </div>
+                        {isAdmin && onDeleteComment && (
+                          <button
+                            type="button"
+                            onClick={() => onDeleteComment(comment.id)}
+                            className={`self-start p-2 rounded-lg opacity-0 group-hover/comment:opacity-100 transition-all cursor-pointer ${isDark ? 'text-gray-600 hover:text-red-500 hover:bg-red-500/10' : 'text-gray-300 hover:text-red-500 hover:bg-red-50'}`}
+                            title="删除评论"
+                          >
+                            <Trash2 className="w-3.5 h-3.5" />
+                          </button>
+                        )}
+                      </motion.div>
+                    ))}
+                  </AnimatePresence>
+                </div>
+              )}
             </div>
         </div>
     </div>
