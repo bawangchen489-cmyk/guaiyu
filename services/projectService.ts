@@ -332,25 +332,60 @@ export async function incrementViews(id: number | string): Promise<void> {
 }
 
 /**
- * 将 File 对象转换为 Base64 编码的 Data URL
+ * 压缩图片并转为 Base64（防止巨大文件把 localStorage 兡満）
+ * - 图片：经过 Canvas 缩放 + 压缩，最大宽/高 1200px，输出体积控制在 ~200KB 以内
+ * - 视频 / 其他文件：直接读取原始数据（不压缩）
  */
-function fileToBase64(file: File): Promise<string> {
+function compressImageToBase64(file: File, maxPx = 1200, quality = 0.72): Promise<string> {
+    // 非图片直接返回原始 base64
+    if (!file.type.startsWith('image/')) {
+        return new Promise((resolve, reject) => {
+            const reader = new FileReader()
+            reader.onloadend = () => resolve(reader.result as string)
+            reader.onerror = () => reject(new Error('文件读取失败'))
+            reader.readAsDataURL(file)
+        })
+    }
     return new Promise((resolve, reject) => {
-        const reader = new FileReader()
-        reader.onloadend = () => resolve(reader.result as string)
-        reader.onerror = () => reject(new Error('文件转换为 Base64 失败'))
-        reader.readAsDataURL(file)
+        const img = new Image()
+        const url = URL.createObjectURL(file)
+        img.onload = () => {
+            URL.revokeObjectURL(url)
+            let { width, height } = img
+            if (width > maxPx || height > maxPx) {
+                if (width >= height) {
+                    height = Math.round(height * maxPx / width)
+                    width = maxPx
+                } else {
+                    width = Math.round(width * maxPx / height)
+                    height = maxPx
+                }
+            }
+            const canvas = document.createElement('canvas')
+            canvas.width = width
+            canvas.height = height
+            const ctx = canvas.getContext('2d')
+            if (!ctx) { resolve(img.src); return }
+            ctx.drawImage(img, 0, 0, width, height)
+            const compressed = canvas.toDataURL(
+                file.type === 'image/png' ? 'image/png' : 'image/jpeg',
+                quality
+            )
+            resolve(compressed)
+        }
+        img.onerror = () => { URL.revokeObjectURL(url); reject(new Error('图片加载失败')) }
+        img.src = url
     })
 }
 
 /**
  * 上传图片到 Supabase Storage（前端直传，绕过 Vercel Serverless 限制）
- * 如果上传失败，自动降级为 Base64 编码以保证作品和文件能正常发布/保存
+ * 如果上传失败，自动降级为压缩版 Base64 以保证作品能正常发布/保存
  */
 export async function uploadImage(file: File, folder: string = 'projects'): Promise<string> {
     if (!isSupabaseConfigured) {
-        console.warn('⚠️ Supabase 未配置，文件上传自动降级为 Base64。')
-        return fileToBase64(file)
+        console.warn('⚠️ Supabase 未配置，文件上传自动降级为压缩 Base64。')
+        return compressImageToBase64(file)
     }
 
     const fileExt = file.name.split('.').pop()
@@ -377,11 +412,11 @@ export async function uploadImage(file: File, folder: string = 'projects'): Prom
         return data.publicUrl
     } catch (err: any) {
         console.warn(
-            '⚠️ Supabase Storage 上传失败，正在降级为 Base64 本地编码存储。\n' +
+            '⚠️ Supabase Storage 上传失败，正在降级为压缩 Base64 本地编码存储。\n' +
             '建议在 Supabase 中创建一个名为 "images" 的 Public 存储桶以获得更好的加载性能。\n' +
             '错误详情:', err
         )
-        return fileToBase64(file)
+        return compressImageToBase64(file)
     }
 }
 

@@ -151,26 +151,56 @@ export async function updateAvatar(codename: string, avatarUrl: string): Promise
     }
 }
 
+
 /**
- * 将 File 对象转换为 Base64 编码的 Data URL
+ * 压缩图片并转为 Base64（防止大图片把 localStorage 撑满）
+ * 头像压缩到最大 400x400，质量 0.8，输出 ~30KB
  */
-function fileToBase64(file: File): Promise<string> {
+function compressImageToBase64(file: File, maxPx = 400, quality = 0.8): Promise<string> {
+    if (!file.type.startsWith('image/')) {
+        return new Promise((resolve, reject) => {
+            const reader = new FileReader()
+            reader.onloadend = () => resolve(reader.result as string)
+            reader.onerror = () => reject(new Error('文件读取失败'))
+            reader.readAsDataURL(file)
+        })
+    }
     return new Promise((resolve, reject) => {
-        const reader = new FileReader()
-        reader.onloadend = () => resolve(reader.result as string)
-        reader.onerror = () => reject(new Error('文件转换为 Base64 失败'))
-        reader.readAsDataURL(file)
+        const img = new Image()
+        const url = URL.createObjectURL(file)
+        img.onload = () => {
+            URL.revokeObjectURL(url)
+            let { width, height } = img
+            if (width > maxPx || height > maxPx) {
+                if (width >= height) {
+                    height = Math.round(height * maxPx / width)
+                    width = maxPx
+                } else {
+                    width = Math.round(width * maxPx / height)
+                    height = maxPx
+                }
+            }
+            const canvas = document.createElement('canvas')
+            canvas.width = width
+            canvas.height = height
+            const ctx = canvas.getContext('2d')
+            if (!ctx) { resolve(img.src); return }
+            ctx.drawImage(img, 0, 0, width, height)
+            resolve(canvas.toDataURL('image/jpeg', quality))
+        }
+        img.onerror = () => { URL.revokeObjectURL(url); reject(new Error('图片加载失败')) }
+        img.src = url
     })
 }
 
 /**
  * 上传头像到 Supabase Storage
- * 如果上传失败，自动降级为 Base64 本地编码存储
+ * 如果上传失败，自动降级为压缩版 Base64 本地编码存储
  */
 export async function uploadAvatar(file: File): Promise<string> {
     if (!isSupabaseConfigured) {
-        console.warn('⚠️ Supabase 未配置，头像上传自动降级为 Base64。')
-        return fileToBase64(file)
+        console.warn('⚠️ Supabase 未配置，头像上传自动降级为压缩 Base64。')
+        return compressImageToBase64(file)
     }
 
     const fileExt = file.name.split('.').pop()
@@ -197,10 +227,10 @@ export async function uploadAvatar(file: File): Promise<string> {
         return data.publicUrl
     } catch (err: any) {
         console.warn(
-            '⚠️ Supabase Storage 上传头像失败，正在降级为 Base64 本地编码存储。\n' +
+            '⚠️ Supabase Storage 上传头像失败，正在降级为压缩 Base64 本地编码存储。\n' +
             '建议在 Supabase 中创建一个名为 "images" 的 Public 存储桶以获得更好的加载性能。\n' +
             '错误详情:', err
         )
-        return fileToBase64(file)
+        return compressImageToBase64(file)
     }
 }
