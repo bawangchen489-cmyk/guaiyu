@@ -284,11 +284,25 @@ export async function incrementViews(id: number | string): Promise<void> {
 }
 
 /**
+ * 将 File 对象转换为 Base64 编码的 Data URL
+ */
+function fileToBase64(file: File): Promise<string> {
+    return new Promise((resolve, reject) => {
+        const reader = new FileReader()
+        reader.onloadend = () => resolve(reader.result as string)
+        reader.onerror = () => reject(new Error('文件转换为 Base64 失败'))
+        reader.readAsDataURL(file)
+    })
+}
+
+/**
  * 上传图片到 Supabase Storage（前端直传，绕过 Vercel Serverless 限制）
+ * 如果上传失败，自动降级为 Base64 编码以保证作品和文件能正常发布/保存
  */
 export async function uploadImage(file: File, folder: string = 'projects'): Promise<string> {
     if (!isSupabaseConfigured) {
-        throw new Error('Supabase 未配置，无法上传文件。请在 .env.local 中设置 VITE_SUPABASE_URL 和 VITE_SUPABASE_ANON_KEY。')
+        console.warn('⚠️ Supabase 未配置，文件上传自动降级为 Base64。')
+        return fileToBase64(file)
     }
 
     const fileExt = file.name.split('.').pop()
@@ -305,28 +319,22 @@ export async function uploadImage(file: File, folder: string = 'projects'): Prom
             })
 
         if (uploadError) {
-            console.error('Supabase upload error:', uploadError)
-            throw new Error(`文件上传失败: ${uploadError.message}`)
+            throw uploadError
         }
-    } catch (err: unknown) {
-        // 如果是我们自己抛出的错误，直接向上传递
-        if (err instanceof Error && err.message.startsWith('文件上传失败')) {
-            throw err
-        }
-        // 网络级别错误（Failed to fetch / CORS）
-        console.error('Network error during upload:', err)
-        throw new Error(
-            '文件上传网络错误。请检查：\n' +
-            '1. Supabase Storage 中是否已创建名为 "images" 的存储桶\n' +
-            '2. 存储桶是否设置为 Public（公开）\n' +
-            '3. 存储桶的 RLS 策略是否允许上传（INSERT）'
+
+        const { data } = supabase.storage
+            .from('images')
+            .getPublicUrl(filePath)
+
+        return data.publicUrl
+    } catch (err: any) {
+        console.warn(
+            '⚠️ Supabase Storage 上传失败，正在降级为 Base64 本地编码存储。\n' +
+            '建议在 Supabase 中创建一个名为 "images" 的 Public 存储桶以获得更好的加载性能。\n' +
+            '错误详情:', err
         )
+        return fileToBase64(file)
     }
-
-    const { data } = supabase.storage
-        .from('images')
-        .getPublicUrl(filePath)
-
-    return data.publicUrl
 }
+
 

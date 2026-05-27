@@ -152,35 +152,55 @@ export async function updateAvatar(codename: string, avatarUrl: string): Promise
 }
 
 /**
+ * 将 File 对象转换为 Base64 编码的 Data URL
+ */
+function fileToBase64(file: File): Promise<string> {
+    return new Promise((resolve, reject) => {
+        const reader = new FileReader()
+        reader.onloadend = () => resolve(reader.result as string)
+        reader.onerror = () => reject(new Error('文件转换为 Base64 失败'))
+        reader.readAsDataURL(file)
+    })
+}
+
+/**
  * 上传头像到 Supabase Storage
+ * 如果上传失败，自动降级为 Base64 本地编码存储
  */
 export async function uploadAvatar(file: File): Promise<string> {
     if (!isSupabaseConfigured) {
-        // 本地模式：使用 Base64
-        return new Promise((resolve, reject) => {
-            const reader = new FileReader()
-            reader.onloadend = () => resolve(reader.result as string)
-            reader.onerror = reject
-            reader.readAsDataURL(file)
-        })
+        console.warn('⚠️ Supabase 未配置，头像上传自动降级为 Base64。')
+        return fileToBase64(file)
     }
 
     const fileExt = file.name.split('.').pop()
     const fileName = `${Date.now()}-${Math.random().toString(36).substring(7)}.${fileExt}`
     const filePath = `avatars/${fileName}`
 
-    const { error: uploadError } = await supabase.storage
-        .from('images')
-        .upload(filePath, file)
+    try {
+        const { error: uploadError } = await supabase.storage
+            .from('images')
+            .upload(filePath, file, {
+                cacheControl: '3600',
+                contentType: file.type,
+                upsert: false
+            })
 
-    if (uploadError) {
-        console.error('Error uploading avatar:', uploadError)
-        throw new Error(`头像上传失败: ${uploadError.message}`)
+        if (uploadError) {
+            throw uploadError
+        }
+
+        const { data } = supabase.storage
+            .from('images')
+            .getPublicUrl(filePath)
+
+        return data.publicUrl
+    } catch (err: any) {
+        console.warn(
+            '⚠️ Supabase Storage 上传头像失败，正在降级为 Base64 本地编码存储。\n' +
+            '建议在 Supabase 中创建一个名为 "images" 的 Public 存储桶以获得更好的加载性能。\n' +
+            '错误详情:', err
+        )
+        return fileToBase64(file)
     }
-
-    const { data } = supabase.storage
-        .from('images')
-        .getPublicUrl(filePath)
-
-    return data.publicUrl
 }
