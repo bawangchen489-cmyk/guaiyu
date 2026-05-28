@@ -17,6 +17,7 @@ export interface ProjectRow {
     client: string
     tools: string
     created_at: string
+    deleted_at: string | null
 }
 
 // 将数据库行转换为前端 Project 类型
@@ -40,81 +41,83 @@ function rowToProject(row: ProjectRow): Project {
 
 // 将前端 Project 转换为数据库行格式
 function projectToRow(project: Partial<Project>): Partial<ProjectRow> {
-    return {
-        title: project.title,
-        author: project.author,
-        image: project.image,
-        avatar: project.avatar,
-        likes: project.likes,
-        views: String(project.views),
-        height: project.height,
-        category: project.category,
-        description: project.description,
-        project_date: project.date,
-        client: project.client,
-        tools: project.tools,
-    }
+    const row: any = {}
+    if (project.title !== undefined) row.title = project.title
+    if (project.author !== undefined) row.author = project.author
+    if (project.image !== undefined) row.image = project.image
+    if (project.avatar !== undefined) row.avatar = project.avatar
+    if (project.likes !== undefined) row.likes = project.likes
+    if (project.views !== undefined) row.views = String(project.views)
+    if (project.height !== undefined) row.height = project.height
+    if (project.category !== undefined) row.category = project.category
+    if (project.description !== undefined) row.description = project.description
+    if (project.date !== undefined) row.project_date = project.date
+    if (project.client !== undefined) row.client = project.client
+    if (project.tools !== undefined) row.tools = project.tools
+    return row
 }
 
-// localStorage key 只存用户上传的作品，不存 INITIAL_PROJECTS（防止超出 5MB 限制）
+// ============================================================
+// LOCAL MODE: 仅当 Supabase 未配置时使用 localStorage
+// ============================================================
 const LOCAL_USER_PROJECTS_KEY = 'guaiyu_user_projects'
+const LOCAL_DELETED_KEY = 'guaiyu_deleted_projects'
 
-/** 从 localStorage 读取用户自己创建的作品 */
 function getLocalUserProjects(): Project[] {
     try {
         const raw = localStorage.getItem(LOCAL_USER_PROJECTS_KEY)
-        if (!raw) return []
-        return JSON.parse(raw) as Project[]
-    } catch {
-        return []
-    }
+        return raw ? JSON.parse(raw) : []
+    } catch { return [] }
 }
 
-/** 保存用户自己创建的作品列表到 localStorage */
 function saveLocalUserProjects(projects: Project[]): void {
-    try {
-        localStorage.setItem(LOCAL_USER_PROJECTS_KEY, JSON.stringify(projects))
-    } catch (e) {
-        console.error('⚠️ localStorage 写入失败，可能存储已满：', e)
-    }
+    try { localStorage.setItem(LOCAL_USER_PROJECTS_KEY, JSON.stringify(projects)) }
+    catch (e) { console.error('localStorage 写入失败:', e) }
 }
+
+function getLocalDeletedProjects(): Project[] {
+    try {
+        const raw = localStorage.getItem(LOCAL_DELETED_KEY)
+        return raw ? JSON.parse(raw) : []
+    } catch { return [] }
+}
+
+function saveLocalDeletedProjects(projects: Project[]): void {
+    try { localStorage.setItem(LOCAL_DELETED_KEY, JSON.stringify(projects)) }
+    catch (e) { console.error('localStorage 写入失败:', e) }
+}
+
+// ============================================================
+// CRUD 操作
+// ============================================================
 
 /**
- * 获取所有项目
- * - 如果 Supabase 已配置：从数据库读取，并合并本地用户作品
- * - 如果未配置：返回 INITIAL_PROJECTS + 本地用户作品
+ * 获取所有活跃项目（未删除的）
  */
 export async function getProjects(): Promise<Project[]> {
-    const localUserProjects = getLocalUserProjects()
-
     if (!isSupabaseConfigured) {
-        // 未配置 Supabase：用本地用户作品 + 初始作品
+        // 本地模式：INITIAL_PROJECTS + 用户作品，排除已删除的
+        const userProjects = getLocalUserProjects()
+        const deletedIds = new Set(getLocalDeletedProjects().map(p => String(p.id)))
         const initialIds = new Set(INITIAL_PROJECTS.map(p => String(p.id)))
-        const userOnly = localUserProjects.filter(p => !initialIds.has(String(p.id)))
-        return [...userOnly, ...INITIAL_PROJECTS]
+        const userOnly = userProjects.filter(p => !initialIds.has(String(p.id)) && !deletedIds.has(String(p.id)))
+        const initialActive = INITIAL_PROJECTS.filter(p => !deletedIds.has(String(p.id)))
+        return [...userOnly, ...initialActive]
     }
 
+    // Supabase 模式：100% 信任数据库，只读 deleted_at IS NULL 的记录
     const { data, error } = await supabase
         .from('projects')
         .select('*')
+        .is('deleted_at', null)
         .order('created_at', { ascending: false })
 
     if (error) {
         console.error('Error fetching projects:', error)
-        // Supabase 失败：返回本地用户作品 + 初始作品
-        const initialIds = new Set(INITIAL_PROJECTS.map(p => String(p.id)))
-        const userOnly = localUserProjects.filter(p => !initialIds.has(String(p.id)))
-        return [...userOnly, ...INITIAL_PROJECTS]
+        throw new Error('加载作品失败: ' + error.message)
     }
 
-    const supabaseProjects = (data || []).map(rowToProject)
-    // 将本地用户作品合并进去（避免重复）
-    if (localUserProjects.length > 0) {
-        const supabaseIds = new Set(supabaseProjects.map(p => String(p.id)))
-        const localOnly = localUserProjects.filter(p => !supabaseIds.has(String(p.id)))
-        return [...localOnly, ...supabaseProjects]
-    }
-    return supabaseProjects
+    return (data || []).map(rowToProject)
 }
 
 /**
@@ -148,13 +151,13 @@ export async function createProject(project: Omit<Project, 'id'>): Promise<Proje
     const newProject = { ...project, id: Date.now() } as Project
 
     if (!isSupabaseConfigured) {
-        // 未配置 Supabase：只存用户作品到 guaiyu_user_projects
         const userProjects = getLocalUserProjects()
         userProjects.unshift(newProject)
         saveLocalUserProjects(userProjects)
         return newProject
     }
 
+    // Supabase 模式：直接插入数据库
     const row = projectToRow(project)
 
     const { data, error } = await supabase
@@ -165,11 +168,7 @@ export async function createProject(project: Omit<Project, 'id'>): Promise<Proje
 
     if (error) {
         console.error('Error creating project:', error)
-        // 回退：存入本地用户作品（下次加载时会自动合并）
-        const userProjects = getLocalUserProjects()
-        userProjects.unshift(newProject)
-        saveLocalUserProjects(userProjects)
-        return newProject
+        throw new Error('发布作品失败: ' + error.message)
     }
 
     return rowToProject(data)
@@ -180,13 +179,9 @@ export async function createProject(project: Omit<Project, 'id'>): Promise<Proje
  */
 export async function updateProject(id: number | string, updates: Partial<Project>): Promise<Project> {
     if (!isSupabaseConfigured) {
-        try {
-            const projects = await getProjects()
-            const updated = projects.map(p => String(p.id) === String(id) ? { ...p, ...updates } : p)
-            localStorage.setItem('guaiyu_projects_list', JSON.stringify(updated))
-        } catch (e) {
-            console.error('Failed to update project in localStorage:', e)
-        }
+        const userProjects = getLocalUserProjects()
+        const updated = userProjects.map(p => String(p.id) === String(id) ? { ...p, ...updates } : p)
+        saveLocalUserProjects(updated)
         return { id, ...updates } as Project
     }
 
@@ -201,14 +196,6 @@ export async function updateProject(id: number | string, updates: Partial<Projec
 
     if (error) {
         console.error('Error updating project:', error)
-        // 尝试本地更新回退
-        try {
-            const projects = await getProjects()
-            const updated = projects.map(p => String(p.id) === String(id) ? { ...p, ...updates } : p)
-            localStorage.setItem('guaiyu_projects_list', JSON.stringify(updated))
-        } catch (e) {
-            console.error('Failed to update project in localStorage fallback:', e)
-        }
         return { id, ...updates } as Project
     }
 
@@ -216,17 +203,98 @@ export async function updateProject(id: number | string, updates: Partial<Projec
 }
 
 /**
- * 删除项目
+ * 软删除项目（移入回收站）
  */
 export async function deleteProject(id: number | string): Promise<void> {
-    // 总是先删本地用户作品列表中对应的条目
-    const userProjects = getLocalUserProjects()
-    const filtered = userProjects.filter(p => String(p.id) !== String(id))
-    if (filtered.length !== userProjects.length) {
-        saveLocalUserProjects(filtered)
+    if (!isSupabaseConfigured) {
+        // 本地模式：移入已删除列表
+        const allProjects = [...getLocalUserProjects(), ...INITIAL_PROJECTS]
+        const target = allProjects.find(p => String(p.id) === String(id))
+        if (target) {
+            const deleted = getLocalDeletedProjects()
+            deleted.unshift(target)
+            saveLocalDeletedProjects(deleted)
+        }
+        // 从用户作品中移除
+        const userProjects = getLocalUserProjects()
+        saveLocalUserProjects(userProjects.filter(p => String(p.id) !== String(id)))
+        return
     }
 
-    if (!isSupabaseConfigured) return
+    // Supabase 模式：设置 deleted_at 为当前时间（软删除）
+    const { error } = await supabase
+        .from('projects')
+        .update({ deleted_at: new Date().toISOString() })
+        .eq('id', id)
+
+    if (error) {
+        console.error('Error soft-deleting project:', error)
+        throw new Error('删除作品失败: ' + error.message)
+    }
+}
+
+/**
+ * 获取回收站中的项目
+ */
+export async function getDeletedProjects(): Promise<Project[]> {
+    if (!isSupabaseConfigured) {
+        return getLocalDeletedProjects()
+    }
+
+    const { data, error } = await supabase
+        .from('projects')
+        .select('*')
+        .not('deleted_at', 'is', null)
+        .order('deleted_at', { ascending: false })
+
+    if (error) {
+        console.error('Error fetching deleted projects:', error)
+        return []
+    }
+
+    return (data || []).map(rowToProject)
+}
+
+/**
+ * 恢复回收站中的项目
+ */
+export async function restoreProject(id: number | string): Promise<void> {
+    if (!isSupabaseConfigured) {
+        const deleted = getLocalDeletedProjects()
+        const target = deleted.find(p => String(p.id) === String(id))
+        if (target) {
+            // 移回用户作品
+            const initialIds = new Set(INITIAL_PROJECTS.map(p => String(p.id)))
+            if (!initialIds.has(String(id))) {
+                const userProjects = getLocalUserProjects()
+                userProjects.unshift(target)
+                saveLocalUserProjects(userProjects)
+            }
+        }
+        saveLocalDeletedProjects(deleted.filter(p => String(p.id) !== String(id)))
+        return
+    }
+
+    const { error } = await supabase
+        .from('projects')
+        .update({ deleted_at: null })
+        .eq('id', id)
+
+    if (error) {
+        console.error('Error restoring project:', error)
+        throw new Error('恢复作品失败: ' + error.message)
+    }
+}
+
+/**
+ * 永久删除项目
+ */
+export async function permanentDeleteProject(id: number | string): Promise<void> {
+    if (!isSupabaseConfigured) {
+        const deleted = getLocalDeletedProjects()
+        saveLocalDeletedProjects(deleted.filter(p => String(p.id) !== String(id)))
+        return
+    }
 
     const { error } = await supabase
         .from('projects')
@@ -234,122 +302,62 @@ export async function deleteProject(id: number | string): Promise<void> {
         .eq('id', id)
 
     if (error) {
-        console.error('Error deleting project:', error)
+        console.error('Error permanently deleting project:', error)
+        throw new Error('永久删除失败: ' + error.message)
     }
 }
 
+// ============================================================
+// 点赞 & 浏览量
+// ============================================================
 
-
-/**
- * 增加项目点赞数
- */
 export async function incrementLikes(id: number | string): Promise<number> {
-    if (!isSupabaseConfigured) {
-        return 0 // 本地模式：App.tsx 已处理本地更新
-    }
-
+    if (!isSupabaseConfigured) return 0
     const { data, error } = await supabase.rpc('increment_likes', { project_id: id })
-
-    if (error) {
-        console.error('Error incrementing likes:', error)
-        return 0
-    }
-
+    if (error) { console.error('Error incrementing likes:', error); return 0 }
     return data
 }
 
-/**
- * 减少项目点赞数
- */
 export async function decrementLikes(id: number | string): Promise<number> {
-    if (!isSupabaseConfigured) {
-        return 0
-    }
-
+    if (!isSupabaseConfigured) return 0
     const { data, error } = await supabase.rpc('decrement_likes', { project_id: id })
-
-    if (error) {
-        console.error('Error decrementing likes:', error)
-        return 0
-    }
-
+    if (error) { console.error('Error decrementing likes:', error); return 0 }
     return data
 }
 
-/**
- * 获取用户点赞的项目 ID 列表
- */
 export async function getUserLikedProjectIds(userId: string): Promise<number[]> {
     if (!isSupabaseConfigured) {
         const saved = localStorage.getItem('guaiyu_liked_projects')
         return saved ? JSON.parse(saved) : []
     }
-
-    const { data, error } = await supabase
-        .from('user_likes')
-        .select('project_id')
-        .eq('user_id', userId)
-
-    if (error) {
-        console.error('Error fetching liked projects:', error)
-        return []
-    }
-
+    const { data, error } = await supabase.from('user_likes').select('project_id').eq('user_id', userId)
+    if (error) { console.error('Error fetching liked projects:', error); return [] }
     return (data || []).map(row => row.project_id)
 }
 
-/**
- * 添加用户点赞
- */
 export async function addUserLike(userId: string, projectId: number): Promise<void> {
     if (!isSupabaseConfigured) return
-
-    const { error } = await supabase
-        .from('user_likes')
-        .insert([{ user_id: userId, project_id: projectId }])
-
-    if (error) {
-        console.error('Error adding like:', error)
-    }
+    const { error } = await supabase.from('user_likes').insert([{ user_id: userId, project_id: projectId }])
+    if (error) console.error('Error adding like:', error)
 }
 
-/**
- * 移除用户点赞
- */
 export async function removeUserLike(userId: string, projectId: number): Promise<void> {
     if (!isSupabaseConfigured) return
-
-    const { error } = await supabase
-        .from('user_likes')
-        .delete()
-        .eq('user_id', userId)
-        .eq('project_id', projectId)
-
-    if (error) {
-        console.error('Error removing like:', error)
-    }
+    const { error } = await supabase.from('user_likes').delete().eq('user_id', userId).eq('project_id', projectId)
+    if (error) console.error('Error removing like:', error)
 }
 
-/**
- * 增加项目浏览量
- */
 export async function incrementViews(id: number | string): Promise<void> {
     if (!isSupabaseConfigured) return
-
     const { error } = await supabase.rpc('increment_views', { project_id: id })
-
-    if (error) {
-        console.error('Error incrementing views:', error)
-    }
+    if (error) console.error('Error incrementing views:', error)
 }
 
-/**
- * 压缩图片并转为 Base64（防止巨大文件把 localStorage 兡満）
- * - 图片：经过 Canvas 缩放 + 压缩，最大宽/高 1200px，输出体积控制在 ~200KB 以内
- * - 视频 / 其他文件：直接读取原始数据（不压缩）
- */
+// ============================================================
+// 图片上传
+// ============================================================
+
 function compressImageToBase64(file: File, maxPx = 1200, quality = 0.72): Promise<string> {
-    // 非图片直接返回原始 base64
     if (!file.type.startsWith('image/')) {
         return new Promise((resolve, reject) => {
             const reader = new FileReader()
@@ -365,38 +373,23 @@ function compressImageToBase64(file: File, maxPx = 1200, quality = 0.72): Promis
             URL.revokeObjectURL(url)
             let { width, height } = img
             if (width > maxPx || height > maxPx) {
-                if (width >= height) {
-                    height = Math.round(height * maxPx / width)
-                    width = maxPx
-                } else {
-                    width = Math.round(width * maxPx / height)
-                    height = maxPx
-                }
+                if (width >= height) { height = Math.round(height * maxPx / width); width = maxPx }
+                else { width = Math.round(width * maxPx / height); height = maxPx }
             }
             const canvas = document.createElement('canvas')
-            canvas.width = width
-            canvas.height = height
+            canvas.width = width; canvas.height = height
             const ctx = canvas.getContext('2d')
             if (!ctx) { resolve(img.src); return }
             ctx.drawImage(img, 0, 0, width, height)
-            const compressed = canvas.toDataURL(
-                file.type === 'image/png' ? 'image/png' : 'image/jpeg',
-                quality
-            )
-            resolve(compressed)
+            resolve(canvas.toDataURL(file.type === 'image/png' ? 'image/png' : 'image/jpeg', quality))
         }
         img.onerror = () => { URL.revokeObjectURL(url); reject(new Error('图片加载失败')) }
         img.src = url
     })
 }
 
-/**
- * 上传图片到 Supabase Storage（前端直传，绕过 Vercel Serverless 限制）
- * 如果上传失败，自动降级为压缩版 Base64 以保证作品能正常发布/保存
- */
 export async function uploadImage(file: File, folder: string = 'projects'): Promise<string> {
     if (!isSupabaseConfigured) {
-        console.warn('⚠️ Supabase 未配置，文件上传自动降级为压缩 Base64。')
         return compressImageToBase64(file)
     }
 
@@ -407,29 +400,14 @@ export async function uploadImage(file: File, folder: string = 'projects'): Prom
     try {
         const { error: uploadError } = await supabase.storage
             .from('images')
-            .upload(filePath, file, {
-                cacheControl: '3600',
-                contentType: file.type,
-                upsert: false
-            })
+            .upload(filePath, file, { cacheControl: '3600', contentType: file.type, upsert: false })
 
-        if (uploadError) {
-            throw uploadError
-        }
+        if (uploadError) throw uploadError
 
-        const { data } = supabase.storage
-            .from('images')
-            .getPublicUrl(filePath)
-
+        const { data } = supabase.storage.from('images').getPublicUrl(filePath)
         return data.publicUrl
     } catch (err: any) {
-        console.warn(
-            '⚠️ Supabase Storage 上传失败，正在降级为压缩 Base64 本地编码存储。\n' +
-            '建议在 Supabase 中创建一个名为 "images" 的 Public 存储桶以获得更好的加载性能。\n' +
-            '错误详情:', err
-        )
+        console.warn('⚠️ Storage 上传失败，降级为压缩 Base64:', err)
         return compressImageToBase64(file)
     }
 }
-
-

@@ -10,6 +10,7 @@ import AboutView from './views/AboutView';
 import UploadView from './views/UploadView';
 import ProjectDetailView from './views/ProjectDetailView';
 import LoginView from './views/LoginView';
+import RecycleBinView from './views/RecycleBinView';
 import { Trash2, AlertTriangle, ArrowLeft } from 'lucide-react';
 
 // Supabase services
@@ -75,8 +76,11 @@ export default function App() {
   // 数据加载状态
   const [dataLoading, setDataLoading] = useState(true);
 
-  // 项目列表 - 从 Supabase 加载，不再使用 INITIAL_PROJECTS 作为默认值
+  // 项目列表
   const [projects, setProjects] = useState<Project[]>([]);
+
+  // 回收站项目列表
+  const [deletedProjects, setDeletedProjects] = useState<Project[]>([]);
 
   // 用户信息
   const [userInfo, setUserInfo] = useState<UserInfo>(() => {
@@ -98,22 +102,6 @@ export default function App() {
   // 从 Supabase / localStorage 加载项目数据
   useEffect(() => {
     async function loadProjects() {
-      // 迁移旧的 guaiyu_projects_list 数据到新的 guaiyu_user_projects key
-      try {
-        const oldData = localStorage.getItem('guaiyu_projects_list');
-        const newData = localStorage.getItem('guaiyu_user_projects');
-        if (oldData && !newData) {
-          // 只迁移用户自己上传的作品（id 不在 INITIAL_PROJECTS 里的）
-          const initialIds = new Set(INITIAL_PROJECTS.map(p => String(p.id)));
-          const parsed: Project[] = JSON.parse(oldData);
-          const userOnly = parsed.filter(p => !initialIds.has(String(p.id)));
-          if (userOnly.length > 0) {
-            localStorage.setItem('guaiyu_user_projects', JSON.stringify(userOnly));
-          }
-          localStorage.removeItem('guaiyu_projects_list');
-        }
-      } catch {}
-
       try {
         const allProjects = await projectService.getProjects();
         setProjects(allProjects);
@@ -125,6 +113,16 @@ export default function App() {
       }
     }
     loadProjects();
+  }, []);
+
+  // 加载回收站数据
+  const loadDeletedProjects = useCallback(async () => {
+    try {
+      const deleted = await projectService.getDeletedProjects();
+      setDeletedProjects(deleted);
+    } catch (error) {
+      console.warn('回收站加载失败:', error);
+    }
   }, []);
 
 
@@ -176,9 +174,15 @@ export default function App() {
     sessionStorage.setItem('guaiyu_has_entered', String(hasEntered));
   }, [hasEntered]);
 
+
   useEffect(() => {
     sessionStorage.setItem('guaiyu_current_view', currentView);
-  }, [currentView]);
+    // 进入回收站时加载已删除的项目
+    if (currentView === 'recycle') {
+      loadDeletedProjects();
+    }
+  }, [currentView, loadDeletedProjects]);
+
 
   useEffect(() => {
     if (selectedProject) {
@@ -229,24 +233,63 @@ export default function App() {
 
   const confirmDelete = async () => {
     if (deleteConfirmId) {
-      // 乐观更新 UI
+      // 乐观更新 UI（移入回收站）
+      const deletedProject = projects.find(p => String(p.id) === String(deleteConfirmId));
       setProjects(prev => prev.filter(p => String(p.id) !== String(deleteConfirmId)));
+      if (deletedProject) {
+        setDeletedProjects(prev => [deletedProject, ...prev]);
+      }
 
       if (currentView === 'projectDetail' || currentView === 'preview') {
         setCurrentView('works');
         setSelectedProject(null);
       }
 
-      // 同步到 Supabase
+      // 同步到 Supabase（软删除）
       try {
         await projectService.deleteProject(deleteConfirmId);
       } catch (error) {
-        console.error('Failed to delete from Supabase:', error);
+        console.error('删除失败:', error);
+        // 回滚 UI
+        if (deletedProject) {
+          setProjects(prev => [deletedProject, ...prev]);
+          setDeletedProjects(prev => prev.filter(p => String(p.id) !== String(deleteConfirmId)));
+        }
       }
 
       setDeleteConfirmId(null);
     }
   };
+
+  // 回收站：恢复作品
+  const handleRestore = async (id: number | string) => {
+    const target = deletedProjects.find(p => String(p.id) === String(id));
+    setDeletedProjects(prev => prev.filter(p => String(p.id) !== String(id)));
+    if (target) {
+      setProjects(prev => [target, ...prev]);
+    }
+    try {
+      await projectService.restoreProject(id);
+    } catch (error) {
+      console.error('恢复失败:', error);
+      // 回滚
+      if (target) {
+        setDeletedProjects(prev => [target, ...prev]);
+        setProjects(prev => prev.filter(p => String(p.id) !== String(id)));
+      }
+    }
+  };
+
+  // 回收站：永久删除
+  const handlePermanentDelete = async (id: number | string) => {
+    setDeletedProjects(prev => prev.filter(p => String(p.id) !== String(id)));
+    try {
+      await projectService.permanentDeleteProject(id);
+    } catch (error) {
+      console.error('永久删除失败:', error);
+    }
+  };
+
 
   const handleLogin = async (codename: string, name: string, avatar: string) => {
     try {
@@ -364,9 +407,7 @@ export default function App() {
         return <AboutView avatar={userInfo.avatar} userInfo={userInfo} onAvatarUpload={async (f) => {
           try {
             const avatarUrl = await authService.uploadAvatar(f);
-            // 更新 state → 触发 useEffect 自动保存到 localStorage → 刷新后保留
             setUserInfo(prev => ({ ...prev, avatar: avatarUrl }));
-            // 同步更新 Supabase 用户记录
             if (userInfo.codename) {
               await authService.updateAvatar(userInfo.codename, avatarUrl);
             }
@@ -376,6 +417,15 @@ export default function App() {
         }} theme={theme} />;
       case 'login':
         return <LoginView onLogin={handleLogin} onGuest={() => setCurrentView('home')} theme={theme} />;
+      case 'recycle':
+        return (
+          <RecycleBinView
+            deletedProjects={deletedProjects}
+            onRestore={handleRestore}
+            onPermanentDelete={handlePermanentDelete}
+            theme={theme}
+          />
+        );
       default:
         return <PersonalHomeView onNavigate={setCurrentView} projects={projects} avatar={userInfo.avatar} theme={theme} />;
     }
@@ -402,11 +452,11 @@ export default function App() {
               <div className="absolute top-0 left-0 w-full h-2 bg-red-600"></div>
               <div className="flex flex-col items-center text-center">
                 <div className="w-16 h-16 bg-red-600/10 text-red-600 rounded-full flex items-center justify-center mb-6"><AlertTriangle className="w-8 h-8" /></div>
-                <h2 className={`text-2xl font-black mb-2 ${theme === 'dark' ? 'text-white' : 'text-black'}`}>确认删除?</h2>
-                <p className="text-gray-500 text-sm mb-8 font-medium">此作品一旦从数据库中移除将无法恢复。你确定要继续吗？</p>
+                <h2 className={`text-2xl font-black mb-2 ${theme === 'dark' ? 'text-white' : 'text-black'}`}>移入回收站？</h2>
+                <p className="text-gray-500 text-sm mb-8 font-medium">作品将被移入回收站，你可以随时恢复。</p>
                 <div className="grid grid-cols-2 gap-4 w-full">
                   <button onClick={() => setDeleteConfirmId(null)} className={`py-3 rounded-xl font-black text-sm transition-all ${theme === 'dark' ? 'bg-white/5 text-white hover:bg-white/10' : 'bg-gray-100 text-black hover:bg-gray-200'}`}>取消</button>
-                  <button onClick={confirmDelete} className="py-3 rounded-xl bg-red-600 text-white font-black text-sm shadow-lg shadow-red-600/30 hover:bg-red-500 transition-all flex items-center justify-center gap-2"><Trash2 className="w-4 h-4" /> 确认删除</button>
+                  <button onClick={confirmDelete} className="py-3 rounded-xl bg-red-600 text-white font-black text-sm shadow-lg shadow-red-600/30 hover:bg-red-500 transition-all flex items-center justify-center gap-2"><Trash2 className="w-4 h-4" /> 移入回收站</button>
                 </div>
               </div>
             </motion.div>

@@ -1,7 +1,7 @@
 
 import React, { useState, useEffect } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
-import { Upload, Menu, X, Sun, Moon, LogOut, ShieldCheck, Lock } from 'lucide-react';
+import { Upload, Menu, X, Sun, Moon, LogOut, ShieldCheck, Lock, Trash2 } from 'lucide-react';
 import { ViewType, ThemeType, UserInfo } from '../types';
 
 interface NavbarProps {
@@ -148,6 +148,12 @@ const Navbar: React.FC<NavbarProps> = ({ scrolled, onNavigate, currentView, user
                       className={`w-full flex items-center gap-3 px-4 py-3 text-sm font-bold ${isDark ? 'hover:bg-white/5 text-gray-300' : 'hover:bg-black/5 text-gray-600'} transition-colors`}
                     >
                       <Upload className="w-4 h-4 text-[#ff5e3a]" /> 发布作品
+                    </button>
+                    <button
+                      onClick={() => { handleNavigate('recycle'); setIsUserMenuOpen(false); }}
+                      className={`w-full flex items-center gap-3 px-4 py-3 text-sm font-bold ${isDark ? 'hover:bg-white/5 text-gray-300' : 'hover:bg-black/5 text-gray-600'} transition-colors`}
+                    >
+                      <Trash2 className="w-4 h-4 text-gray-500" /> 回收站
                     </button>
                     <button
                       onClick={() => { onLogout(); setIsUserMenuOpen(false); }}

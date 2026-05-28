@@ -29,7 +29,8 @@ CREATE TABLE IF NOT EXISTS projects (
     project_date DATE DEFAULT CURRENT_DATE,
     client TEXT,
     tools TEXT,
-    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    deleted_at TIMESTAMP DEFAULT NULL
 );
 
 -- ============================================

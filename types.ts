@@ -31,7 +31,7 @@ export interface Experience {
   desc: string;
 }
 
-export type ViewType = 'home' | 'works' | 'projectDetail' | 'upload' | 'preview' | 'about' | 'login';
+export type ViewType = 'home' | 'works' | 'projectDetail' | 'upload' | 'preview' | 'about' | 'login' | 'recycle';
 
 export type ThemeType = 'dark' | 'light';
 
