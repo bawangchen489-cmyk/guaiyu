@@ -42,11 +42,16 @@ let supabase: SupabaseClient
 
 if (isSupabaseConfigured) {
   supabase = createClient(supabaseUrl, supabaseAnonKey)
-  console.log('✅ Supabase connected')
+  console.log('✅ Supabase connected to:', supabaseUrl)
 } else {
-  console.warn('⚠️ Supabase 未配置，使用本地模式。请在 .env.local 中设置 VITE_SUPABASE_URL 和 VITE_SUPABASE_ANON_KEY')
+  console.warn(
+    '⚠️ Supabase 未配置，使用本地模式。',
+    '\n  VITE_SUPABASE_URL:', supabaseUrl || '(empty)',
+    '\n  VITE_SUPABASE_ANON_KEY:', supabaseAnonKey ? '***' + supabaseAnonKey.slice(-6) : '(empty)'
+  )
   supabase = createMockClient()
 }
+
 
 export { supabase }
 export default supabase
